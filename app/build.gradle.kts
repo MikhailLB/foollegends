@@ -18,8 +18,8 @@ android {
         applicationId = "com.legendfool.foollegends"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.1"
     }
 
     signingConfigs {
@@ -42,10 +42,13 @@ android {
             )
         }
         debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix   = "-debug"
+            // No applicationIdSuffix — keep the production bundleId so AppsFlyer
+            // attribution and the OneLink can recognize the debug install.
+            versionNameSuffix = "-debug"
         }
     }
+
+    buildFeatures { buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

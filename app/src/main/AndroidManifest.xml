@@ -55,12 +55,12 @@
         <activity
             android:name=".portal.StreamPortal"
             android:exported="false"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:screenOrientation="sensor"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize"
             android:hardwareAccelerated="true"
-            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+            android:theme="@style/Theme.FoolLegends.Stream" />
 
         <!-- ══ ALERT: push-notification permission ══ -->
         <activity

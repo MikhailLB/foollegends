@@ -1,0 +1,44 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "📱 Build & Install Debug",
+      "type": "shell",
+      "command": "$env:JAVA_HOME='C:\\Program Files\\Android\\Android Studio\\jbr'; .\\gradlew.bat assembleDebug --no-daemon; $adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; & $adb install -r 'app\\build\\outputs\\apk\\debug\\app-debug.apk'",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "📋 Logcat — Gray Part Only",
+      "type": "shell",
+      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; & $adb logcat -v time -s WelcomePortal TrackingDispatch ReachDispatch AppEntry NetWire PushRelay AlertPortal StreamPortal",
+      "presentation": { "reveal": "always", "panel": "new" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "📋 Logcat — All App Logs",
+      "type": "shell",
+      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; $pkg='com.legendfool.foollegends.debug'; $pid=(& $adb shell pidof $pkg).Trim(); if($pid){ & $adb logcat --pid=$pid -v time } else { Write-Host 'App not running — launch it first' }",
+      "presentation": { "reveal": "always", "panel": "new" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "💥 Logcat — Crash Only",
+      "type": "shell",
+      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; & $adb logcat -b crash -v time",
+      "presentation": { "reveal": "always", "panel": "new" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "🔴 Clear App Data (reset to first launch)",
+      "type": "shell",
+      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; & $adb shell pm clear com.legendfool.foollegends.debug; Write-Host 'Done — next launch = first launch'",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -132,18 +132,21 @@ class AlertPortal : AppCompatActivity() {
     private fun buildButton(label: String, accent: Boolean): TextView {
         val tv = TextView(this)
         tv.text = label
-        tv.textSize = 16f
+        tv.textSize = if (accent) 17f else 16f
         tv.gravity = Gravity.CENTER
-        tv.setPadding(dpToPx(32), dpToPx(14), dpToPx(32), dpToPx(14))
+        tv.setPadding(dpToPx(28), dpToPx(14), dpToPx(28), dpToPx(14))
         tv.setTypeface(null, android.graphics.Typeface.BOLD)
+        tv.letterSpacing = 0.06f
         if (accent) {
             tv.setBackgroundResource(R.drawable.gray_btn_accept)
             tv.setTextColor(Color.parseColor("#1A0A00"))
+            tv.setShadowLayer(2f, 0f, 1f, Color.parseColor("#55FFFFFF"))
         } else {
             tv.setBackgroundResource(R.drawable.gray_btn_skip)
-            tv.setTextColor(Color.WHITE)
+            tv.setTextColor(Color.parseColor("#FFD700"))
+            tv.setShadowLayer(4f, 0f, 0f, Color.BLACK)
         }
-        val lp = LinearLayout.LayoutParams(dpToPx(140), dpToPx(48))
+        val lp = LinearLayout.LayoutParams(dpToPx(150), dpToPx(54))
         tv.layoutParams = lp
         return tv
     }

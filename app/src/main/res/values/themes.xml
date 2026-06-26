@@ -12,6 +12,22 @@
         <item name="android:windowContentOverlay">@null</item>
     </style>
 
+    <!--
+        WebView host theme. Disables the launch-preview window so no white/system
+        flash is visible while the WebView is initialising or when the user navigates
+        away from a page.
+    -->
+    <style name="Theme.FoolLegends.Stream" parent="Theme.FoolLegends">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+    </style>
+
     <style name="Theme.FoolLegends.Web" parent="Theme.AppCompat.DayNight.DarkActionBar">
         <item name="colorPrimary">@color/bg_red</item>
         <item name="colorPrimaryDark">@color/bg_dark</item>

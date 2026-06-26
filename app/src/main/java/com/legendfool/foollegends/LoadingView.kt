@@ -16,13 +16,20 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Splash / loading screen. Shows the branded artwork (separate portrait and landscape
- * images), a "Loading..." caption and an animated loading bar drawn on top by code.
- * Works in both orientations; the game itself stays portrait.
+ * Splash / loading screen. Shows the branded artwork (portrait + landscape),
+ * a "Loading..." caption and an animated loading bar drawn in code.
+ *
+ * Two modes:
+ *  - timed (default): bar fills over [durationMs] then calls [onComplete].
+ *    Used by the native game's LoadingActivity.
+ *  - indeterminate: bar eases toward ~92% and keeps a subtle moving shimmer,
+ *    never "completes" on a timer. The caption dots keep animating. Used by
+ *    WelcomePortal while gray/white routing runs (which can take a variable time).
  */
 class LoadingView(
     context: Context,
     private val durationMs: Long = 2400L,
+    private val indeterminate: Boolean = false,
     private val onComplete: () -> Unit
 ) : View(context) {
 
@@ -55,7 +62,6 @@ class LoadingView(
 
         canvas.drawColor(0xFF2C0709.toInt())
         if (width >= height) {
-            // Landscape: fit the WHOLE artwork (contain) so the title is never cropped.
             val bmp = landscape
             val scale = min(w / bmp.width, h / bmp.height)
             val dw = bmp.width * scale
@@ -65,7 +71,6 @@ class LoadingView(
             dstRect.set(l, t, l + dw, t + dh)
             canvas.drawBitmap(bmp, null, dstRect, paint)
         } else {
-            // Portrait: center-crop to fill (only the sides are trimmed, title stays).
             val bmp = portrait
             val scale = max(w / bmp.width, h / bmp.height)
             val sw = w / scale
@@ -78,9 +83,8 @@ class LoadingView(
         }
 
         val elapsed = SystemClock.uptimeMillis() - startTime
-        val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
 
-        // "Loading..." caption with animated dots.
+        // Caption dots — always animating (never frozen).
         val dots = ".".repeat(((elapsed / 400L) % 4L).toInt())
         textPaint.textSize = h * 0.030f
         textPaint.color = gold
@@ -88,29 +92,38 @@ class LoadingView(
         canvas.drawText("Loading$dots", w / 2f, h * 0.885f, textPaint)
         textPaint.clearShadowLayer()
 
-        drawLoadingBar(canvas, w, h, progress)
-
-        if (progress >= 1f && !finished) {
-            finished = true
-            post { onComplete() }
-            return
+        if (indeterminate) {
+            // Ease toward ~0.92 and never finish on a timer.
+            val t = elapsed / 1000f
+            val progress = (0.92f * (1f - Math.exp((-t / 1.1f).toDouble()).toFloat()))
+                .coerceIn(0f, 0.95f)
+            drawLoadingBar(canvas, w, h, progress, shimmer = true, shimmerPhase = elapsed)
+        } else {
+            val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+            drawLoadingBar(canvas, w, h, progress, shimmer = false, shimmerPhase = 0L)
+            if (progress >= 1f && !finished) {
+                finished = true
+                post { onComplete() }
+                return
+            }
         }
         postInvalidateOnAnimation()
     }
 
-    private fun drawLoadingBar(canvas: Canvas, w: Float, h: Float, progress: Float) {
+    private fun drawLoadingBar(
+        canvas: Canvas, w: Float, h: Float, progress: Float,
+        shimmer: Boolean, shimmerPhase: Long
+    ) {
         val barW = w * 0.62f
         val barH = h * 0.022f
         val x0 = (w - barW) / 2f
         val y0 = h * 0.915f
         val r = barH / 2f
 
-        // Track.
         paint.style = Paint.Style.FILL
         paint.color = 0x88000000.toInt()
         canvas.drawRoundRect(x0, y0, x0 + barW, y0 + barH, r, r, paint)
 
-        // Fill.
         if (progress > 0f) {
             val fillW = barW * progress
             paint.shader = LinearGradient(
@@ -119,9 +132,26 @@ class LoadingView(
             )
             canvas.drawRoundRect(x0, y0, x0 + fillW, y0 + barH, r, r, paint)
             paint.shader = null
+
+            // Moving shimmer highlight on the filled portion (indeterminate feel).
+            if (shimmer && fillW > barH) {
+                val sw = barW * 0.18f
+                val cycle = 1400f
+                val phase = (shimmerPhase % cycle.toLong()) / cycle  // 0..1
+                val cx = x0 + (fillW + sw) * phase - sw
+                val left = cx.coerceIn(x0, x0 + fillW)
+                val right = (cx + sw).coerceIn(x0, x0 + fillW)
+                if (right > left) {
+                    paint.shader = LinearGradient(
+                        left, y0, right, y0,
+                        0x00FFFFFF, 0x66FFFFFF, Shader.TileMode.CLAMP
+                    )
+                    canvas.drawRoundRect(left, y0, right, y0 + barH, r, r, paint)
+                    paint.shader = null
+                }
+            }
         }
 
-        // Gold border.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = h * 0.0035f
         paint.color = gold

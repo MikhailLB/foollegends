@@ -1,23 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+    </queries>
 
     <application
+        android:name=".startup.AppEntry"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FoolLegends">
+        android:theme="@style/Theme.FoolLegends"
+        android:enableOnBackInvokedCallback="true"
+        android:networkSecurityConfig="@xml/network_security_config">
 
-        <!-- LAUNCHER: splash → main menu -->
+        <!-- Firebase notification icon + channel -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notif_flame" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="fl_bonus_channel" />
+
+        <!-- ══ LAUNCHER: gray/white router ══ -->
         <activity
-            android:name=".LoadingActivity"
+            android:name=".startup.WelcomePortal"
             android:exported="true"
+            android:launchMode="singleTop"
             android:screenOrientation="sensor"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.FoolLegends.Fullscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -25,7 +51,42 @@
             </intent-filter>
         </activity>
 
-        <!-- MAIN MENU -->
+        <!-- ══ STREAM: full-screen WebView ══ -->
+        <activity
+            android:name=".portal.StreamPortal"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:hardwareAccelerated="true"
+            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+
+        <!-- ══ ALERT: push-notification permission ══ -->
+        <activity
+            android:name=".portal.AlertPortal"
+            android:exported="false"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+
+        <!-- ══ OFFLINE: no-internet ══ -->
+        <activity
+            android:name=".portal.OfflinePortal"
+            android:exported="false"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+
+        <!-- ══ EXISTING: branded loading → game ══ -->
+        <activity
+            android:name=".LoadingActivity"
+            android:exported="false"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+
+        <!-- ══ EXISTING: main menu ══ -->
         <activity
             android:name=".MainActivity"
             android:exported="false"
@@ -33,7 +94,7 @@
             android:configChanges="keyboardHidden"
             android:theme="@style/Theme.FoolLegends.Fullscreen" />
 
-        <!-- GAME -->
+        <!-- ══ EXISTING: game ══ -->
         <activity
             android:name=".GameActivity"
             android:exported="false"
@@ -41,13 +102,22 @@
             android:configChanges="keyboardHidden"
             android:theme="@style/Theme.FoolLegends.Fullscreen" />
 
-        <!-- IN-APP WEBVIEW (Privacy Policy / Support) -->
+        <!-- ══ EXISTING: in-app WebView (Privacy/Support) ══ -->
         <activity
             android:name=".WebActivity"
             android:exported="false"
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.FoolLegends.Web" />
+
+        <!-- ══ FCM: push relay service ══ -->
+        <service
+            android:name=".signal.PushRelay"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
     </application>
 

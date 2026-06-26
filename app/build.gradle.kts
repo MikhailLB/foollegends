@@ -3,9 +3,9 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.gms.google-services")
 }
 
-// Load signing credentials from keystore.properties (outside version control).
 val keystoreProps = Properties()
 val keystorePropsFile = rootProject.file("keystore/keystore.properties")
 if (keystorePropsFile.exists()) keystoreProps.load(keystorePropsFile.inputStream())
@@ -61,6 +61,29 @@ android {
 }
 
 dependencies {
+    // Core
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Network
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Secure storage
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Firebase (keys provided later — google-services.json required)
+    implementation(platform("com.google.firebase:firebase-bom:33.8.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    implementation("com.google.firebase:firebase-appcheck-debug")
+
+    // AppsFlyer (dev key provided later)
+    implementation("com.appsflyer:af-android-sdk:6.16.2")
+    implementation("com.android.installreferrer:installreferrer:2.2")
 }

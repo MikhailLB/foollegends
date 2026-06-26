@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PLACEHOLDER for the push-permission screen background (PORTRAIT).
+  TODO(you): replace this with branded full-screen art. The template uses a
+  vector so it builds with no binary asset; in a real app drop a WebP/PNG named
+  gray_notif_portrait.webp into res/drawable-nodpi/ and delete this file.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:angle="270" android:startColor="#3A0A10" android:endColor="#120509" android:type="linear" />
+</shape>

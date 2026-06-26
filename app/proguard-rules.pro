@@ -27,7 +27,7 @@
 -keep class androidx.security.crypto.** { *; }
 
 # App classes needed for FCM
--keep class com.legendfool.foollegends.signal.** { *; }
+-keep class com.example.grayshell.signal.** { *; }
 
 # Strip logs in release
 -assumenosideeffects class android.util.Log {

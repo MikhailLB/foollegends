@@ -11,19 +11,23 @@ val keystorePropsFile = rootProject.file("keystore/keystore.properties")
 if (keystorePropsFile.exists()) keystoreProps.load(keystorePropsFile.inputStream())
 
 android {
-    namespace = "com.legendfool.foollegends"
+    namespace = "com.example.grayshell"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.legendfool.foollegends"
+        applicationId = "com.example.grayshell" // TODO(you): your real bundle id
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.1"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
+    // Release signing is configured only when keystore/keystore.properties exists.
+    // Copy keystore/keystore.properties.example → keystore.properties and point it
+    // at your .jks (both are gitignored). Without it, release builds stay unsigned.
+    val hasKeystore = keystorePropsFile.exists()
     signingConfigs {
-        create("release") {
+        if (hasKeystore) create("release") {
             storeFile     = file(keystoreProps["storeFile"] as String)
             storePassword = keystoreProps["storePassword"] as String
             keyAlias      = keystoreProps["keyAlias"] as String
@@ -35,7 +39,7 @@ android {
         release {
             isMinifyEnabled   = true
             isShrinkResources = true
-            signingConfig     = signingConfigs.getByName("release")
+            if (hasKeystore) signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

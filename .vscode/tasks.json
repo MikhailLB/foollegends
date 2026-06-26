@@ -20,7 +20,7 @@
     {
       "label": "📋 Logcat — All App Logs",
       "type": "shell",
-      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; $pkg='com.legendfool.foollegends.debug'; $pid=(& $adb shell pidof $pkg).Trim(); if($pid){ & $adb logcat --pid=$pid -v time } else { Write-Host 'App not running — launch it first' }",
+      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; $pkg='com.example.grayshell'; $pid=(& $adb shell pidof $pkg).Trim(); if($pid){ & $adb logcat --pid=$pid -v time } else { Write-Host 'App not running — launch it first' }",
       "presentation": { "reveal": "always", "panel": "new" },
       "isBackground": true,
       "problemMatcher": []
@@ -36,7 +36,7 @@
     {
       "label": "🔴 Clear App Data (reset to first launch)",
       "type": "shell",
-      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; & $adb shell pm clear com.legendfool.foollegends.debug; Write-Host 'Done — next launch = first launch'",
+      "command": "$adb=\"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\"; & $adb shell pm clear com.example.grayshell; Write-Host 'Done — next launch = first launch'",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
     }

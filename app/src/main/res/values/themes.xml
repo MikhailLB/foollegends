@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.FoolLegends" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.App" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/bg_dark</item>
         <item name="android:statusBarColor">@color/bg_dark</item>
         <item name="android:navigationBarColor">@color/bg_dark</item>
     </style>
 
-    <style name="Theme.FoolLegends.Fullscreen" parent="Theme.FoolLegends">
+    <style name="Theme.App.Fullscreen" parent="Theme.App">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowContentOverlay">@null</item>
     </style>
 
     <!--
         WebView host theme. Disables the launch-preview window so no white/system
-        flash is visible while the WebView is initialising or when the user navigates
-        away from a page.
+        flash is visible while the WebView initialises or when the user navigates
+        away from a page (see kotlin_gray_pitfalls.mdc #8).
     -->
-    <style name="Theme.FoolLegends.Stream" parent="Theme.FoolLegends">
+    <style name="Theme.App.Stream" parent="Theme.App">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowContentOverlay">@null</item>
         <item name="android:windowBackground">@android:color/black</item>
@@ -26,12 +26,6 @@
         <item name="android:windowDisablePreview">true</item>
         <item name="android:statusBarColor">@android:color/black</item>
         <item name="android:navigationBarColor">@android:color/black</item>
-    </style>
-
-    <style name="Theme.FoolLegends.Web" parent="Theme.AppCompat.DayNight.DarkActionBar">
-        <item name="colorPrimary">@color/bg_red</item>
-        <item name="colorPrimaryDark">@color/bg_dark</item>
-        <item name="android:statusBarColor">@color/bg_dark</item>
     </style>
 
 </resources>

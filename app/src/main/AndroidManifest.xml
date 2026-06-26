@@ -24,19 +24,22 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FoolLegends"
+        android:theme="@style/Theme.App"
         android:enableOnBackInvokedCallback="true"
         android:networkSecurityConfig="@xml/network_security_config">
 
-        <!-- Firebase notification icon + channel -->
+        <!-- Firebase: monochrome notification icon + default channel.
+             TODO(you): use your own monochrome icon and a unique channel id. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@drawable/ic_notif_flame" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="fl_bonus_channel" />
+            android:value="app_push_channel" />
 
-        <!-- ══ LAUNCHER: gray/white router ══ -->
+        <!-- ══ LAUNCHER: gray/white router (shows the splash, decides the mode) ══
+             TODO(you): add your AppsFlyer OneLink deep-link <intent-filter> here
+             (scheme=https, host=<yourapp>.onelink.me, autoVerify="true"). -->
         <activity
             android:name=".startup.WelcomePortal"
             android:exported="true"
@@ -44,14 +47,14 @@
             android:screenOrientation="sensor"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.FoolLegends.Fullscreen">
+            android:theme="@style/Theme.App.Fullscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- ══ STREAM: full-screen WebView ══ -->
+        <!-- ══ STREAM: full-screen WebView shell (gray) ══ -->
         <activity
             android:name=".portal.StreamPortal"
             android:exported="false"
@@ -60,55 +63,31 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize"
             android:hardwareAccelerated="true"
-            android:theme="@style/Theme.FoolLegends.Stream" />
+            android:theme="@style/Theme.App.Stream" />
 
-        <!-- ══ ALERT: push-notification permission ══ -->
+        <!-- ══ ALERT: push-notification permission (Accept / Skip) ══ -->
         <activity
             android:name=".portal.AlertPortal"
             android:exported="false"
             android:screenOrientation="sensor"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+            android:theme="@style/Theme.App.Fullscreen" />
 
-        <!-- ══ OFFLINE: no-internet ══ -->
+        <!-- ══ OFFLINE: no-internet screen + Retry ══ -->
         <activity
             android:name=".portal.OfflinePortal"
             android:exported="false"
             android:screenOrientation="sensor"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:theme="@style/Theme.FoolLegends.Fullscreen" />
+            android:theme="@style/Theme.App.Fullscreen" />
 
-        <!-- ══ EXISTING: branded loading → game ══ -->
+        <!-- ══ NATIVE / WHITE PART: replace with your real game host Activity ══ -->
         <activity
-            android:name=".LoadingActivity"
+            android:name=".NativeContentActivity"
             android:exported="false"
             android:screenOrientation="sensor"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:theme="@style/Theme.FoolLegends.Fullscreen" />
-
-        <!-- ══ EXISTING: main menu ══ -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:configChanges="keyboardHidden"
-            android:theme="@style/Theme.FoolLegends.Fullscreen" />
-
-        <!-- ══ EXISTING: game ══ -->
-        <activity
-            android:name=".GameActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:configChanges="keyboardHidden"
-            android:theme="@style/Theme.FoolLegends.Fullscreen" />
-
-        <!-- ══ EXISTING: in-app WebView (Privacy/Support) ══ -->
-        <activity
-            android:name=".WebActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:theme="@style/Theme.FoolLegends.Web" />
+            android:theme="@style/Theme.App.Fullscreen" />
 
         <!-- ══ FCM: push relay service ══ -->
         <service

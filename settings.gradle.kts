@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Fool Legends"
+rootProject.name = "Gray Shell"
 include(":app")

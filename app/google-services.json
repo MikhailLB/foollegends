@@ -1,20 +1,21 @@
 {
+  "//": "PLACEHOLDER Firebase config so the template compiles. TODO(you): replace with the real google-services.json from Firebase Console (Project Settings > Android app). The package_name MUST equal your applicationId.",
   "project_info": {
-    "project_number": "1040007503051",
-    "project_id": "foollegends",
-    "storage_bucket": "foollegends.firebasestorage.app"
+    "project_number": "000000000000",
+    "project_id": "your-firebase-project",
+    "storage_bucket": "your-firebase-project.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1040007503051:android:745f0049e5d538a0dfcf4e",
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
         "android_client_info": {
-          "package_name": "com.legendfool.foollegends"
+          "package_name": "com.example.grayshell"
         }
       },
       "oauth_client": [],
       "api_key": [
-        { "current_key": "AIzaSyBSG1NAo_L2OL2ExYXHiS_q5Z1LzsnExM8" }
+        { "current_key": "AIzaSyPLACEHOLDER_REPLACE_WITH_REAL_KEY_000" }
       ],
       "services": {
         "appinvite_service": { "other_platform_oauth_client": [] }

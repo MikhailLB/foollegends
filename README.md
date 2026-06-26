@@ -1,63 +1,69 @@
-# Fool Legends
+# Android Gray-Part Template (Kotlin)
 
-Залипательная мини-игра на реакцию и память «Джокер говорит» (вариация Simon Says
-с обманом). Нативный Android на **Kotlin**, всё рисуется кодом на `Canvas` — из
-ассетов только лица Джокера и арт лоадинг-экрана.
+A native **Kotlin** Android template implementing the "gray flow": one binary
+that shows either a **WebView shell** (paid/attributed users) or a **native
+game/content** (organic users), decided at runtime from **AppsFlyer**
+attribution via a backend config endpoint. Includes FCM push, a push-permission
+screen, a no-internet screen and a branded loading splash.
 
-- **Package / applicationId:** `com.legendfool.foollegends`
-- **minSdk:** 24, **targetSdk / compileSdk:** 35
-- **Ориентация:** лоадинг — портрет и ландшафт, сама игра — только портрет.
+> This is a **template with placeholders**, not a finished app. Search the code
+> for `TODO(you)` and fill in your values. The full design + rules live in
+> `.cursor/rules/` and the deploy workflow in `.cursor/skills/gray-part-kotlin/`.
 
-## Как играть
-
-Джокер показывает команду (например, «НАЖМИ КРАСНУЮ») — игрок жмёт нужный цвет.
-Кнопки 2×2:
-
-```
-КРАСНАЯ   СИНЯЯ
-ЗЕЛЁНАЯ   ЖЁЛТАЯ
-```
-
-Прогрессия сложности (каждый успех = +1 уровень):
-
-| Уровни | Что добавляется |
-|--------|-----------------|
-| 1–5    | обычные одиночные команды |
-| 6–10   | ложь: «Я ВРУ! НЕ ЖМИ …» → жми любой цвет, кроме названного |
-| 11–20  | таймер 3 секунды на ответ |
-| 21+    | серии цветов; при «ДЖОКЕР ВРЁТ» жми противоположные (красный↔синий, зелёный↔жёлтый), серии длиннее и быстрее — бесконечно |
-
-Ошибка → Джокер смеётся, экран трясётся, забег начинается заново. Рекорд (лучший
-уровень) хранится локально.
-
-## Структура
+## Architecture (module map)
 
 ```
-app/src/main/java/com/legendfool/foollegends/
-  LoadingActivity.kt   — сплэш (две ориентации) → запуск игры
-  LoadingView.kt       — арт + "Loading..." + анимированный прогресс-бар (код)
-  GameActivity.kt      — портретный хост игры
-  GameView.kt          — вся отрисовка: кнопки, джокер, подсветка, тряска, таймер
-  GameEngine.kt        — чистая логика: цвета, генерация уровней, правила лжи
-  Fullscreen.kt        — иммерсивный полноэкранный режим
-app/src/main/res/drawable-nodpi/  — joker_*.png, loading_portrait/landscape.png
-web/                  — privacy-policy.html, support.html (для хостинга)
-tools/make_icons.ps1  — генерация иконок из лица Джокера
+startup/AppEntry           Application: Firebase + AppCheck + AppsFlyer init
+startup/WelcomePortal      LAUNCHER: splash + gray/white routing state machine
+portal/StreamPortal        Full-screen WebView shell (gray)
+portal/AlertPortal         Push-permission screen (Accept / Skip)
+portal/OfflinePortal       No-internet screen + Retry
+NativeContentActivity      PLACEHOLDER white part — replace with your game
+reach/ReachDispatch        POST to config endpoint (OkHttp)
+reach/TrackingDispatch     AppsFlyer attribution + GCD organic retry
+signal/PushRelay + PushBus FCM service + warm-URL hand-off
+vault/CipherVault          XOR string deobfuscator (unique seed per project)
+vault/DataVault            prefs + EncryptedSharedPreferences
+wire/NetWire               connectivity (default network callback + TCP probe)
+blueprint/AppBlueprint     central config + encoded secrets
+LoadingView                animated splash (placeholder art)
 ```
 
-## Сборка
+## Setup checklist
 
-```powershell
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"   # JDK 17–21
-.\gradlew.bat assembleDebug
+1. **Rename for your project** (fingerprint — mandatory, see
+   `.cursor/rules/kotlin_fingerprint.mdc`): change the package
+   `com.example.grayshell`, class names, `CipherVault` seed + formula, storage
+   keys, FCM channel id and library versions. Never ship two apps identical.
+2. **`AppBlueprint`**: set `bundleId` / `appLabel` / `appNameToken`, then encode
+   and paste the config URL, AppsFlyer dev key, Firebase project number and GCD
+   base URL (decode-verify each array).
+3. **`app/build.gradle.kts`**: set `applicationId` (= bundle id).
+4. **`google-services.json`**: replace the placeholder with your real Firebase
+   file (package_name must equal applicationId).
+5. **AndroidManifest**: add the AppsFlyer OneLink deep-link `<intent-filter>`.
+6. **Assets**: drop branded splash art (`LoadingView`), gray-screen backgrounds
+   (`res/drawable*/gray_*`), launcher icon and a monochrome notification icon
+   (`res/drawable/ic_notif_*`).
+7. **White part**: replace `NativeContentActivity` with your real game.
+8. **Firebase push backend**: add the service account from the TZ as Owner.
+9. **Signing**: copy `keystore/keystore.properties.example` →
+   `keystore.properties`, point it at your `.jks`.
+
+## Build
+
+```
+gradlew assembleDebug                 # debug apk
+gradlew assembleRelease bundleRelease # signed release apk + aab (needs keystore)
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`.
-Либо просто открыть папку как проект в Android Studio и нажать Run.
+Install with `adb install -r` (not `installDebug`) so it works on locked devices.
 
-## Privacy / Support
+## Knowledge base
 
-- Privacy Policy: https://foollegends.com/privacy-policy.html
-- Support: https://foollegends.com/support.html
-
-Исходники страниц — в папке `web/`.
+- `.cursor/rules/kotlin_gray_guide.mdc` — full architecture, state machine, config contract
+- `.cursor/rules/kotlin_webview.mdc` — WebView requirements
+- `.cursor/rules/kotlin_gray_pitfalls.mdc` — real bugs + fixes
+- `.cursor/rules/kotlin_fingerprint.mdc` — per-project uniqueness
+- `.cursor/skills/gray-part-kotlin/SKILL.md` — deploy workflow

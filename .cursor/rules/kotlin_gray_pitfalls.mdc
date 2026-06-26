@@ -1,0 +1,305 @@
+---
+description: Real bugs hit while building the native Kotlin gray-part app and their exact fixes. Consult before debugging crashes, blank screens, attribution failures, or build errors in a Kotlin gray-part project.
+globs: app/src/main/java/**/*.kt,app/build.gradle.kts,app/src/main/AndroidManifest.xml
+alwaysApply: false
+---
+
+# Kotlin Gray-Part — Pitfalls & Fixes
+
+Every entry below is a bug that actually occurred while building this app, with
+the root cause and the fix. Apply these preventively in new projects.
+
+---
+
+## 1. `.debug` applicationIdSuffix breaks AppsFlyer attribution (CRITICAL)
+
+**Symptom:** App always falls into native/white mode. Backend returns
+`404 {"ok":false,"message":"No data"}`. AppsFlyer GCD returns
+`400 {"error_reason":"App ID is incorrect"}`. Attribution body is empty.
+
+**Cause:** `debug { applicationIdSuffix = ".debug" }` makes the package
+`com.x.app.debug`. AppsFlyer/OneLink and Firebase are registered for the real
+`com.x.app`, so attribution never binds.
+
+**Fix:** Do NOT use `applicationIdSuffix` for debug. Keep the production
+`applicationId` so AppsFlyer recognizes the install. Use only
+`versionNameSuffix = "-debug"` if you need to distinguish builds.
+
+```kotlin
+buildTypes {
+    debug { versionNameSuffix = "-debug" } // no applicationIdSuffix
+}
+```
+
+Also keep `google-services.json` with the single real package (no `.debug`
+client entry needed once the suffix is gone).
+
+---
+
+## 2. Window insets controller NPE before setContentView (CRASH)
+
+**Symptom:** `NullPointerException: ... getWindowInsetsController() on a null
+object reference` in `onCreate`.
+
+**Cause:** touching `window.insetsController` / decorView before
+`setContentView` — DecorView doesn't exist yet.
+
+**Fix:** call the fullscreen/immersive helper AFTER `setContentView`, and use
+`WindowCompat`:
+
+```kotlin
+setContentView(view)
+WindowCompat.setDecorFitsSystemWindows(window, false)
+WindowCompat.getInsetsController(window, window.decorView)
+    .hide(WindowInsetsCompat.Type.systemBars())
+```
+
+---
+
+## 3. Vibration without permission (CRASH)
+
+**Symptom:** `SecurityException: ... requires android.permission.VIBRATE`.
+
+**Fix:** add `<uses-permission android:name="android.permission.VIBRATE"/>`
+AND wrap the call in try/catch — vibration is cosmetic, never let it crash:
+
+```kotlin
+try { vibrator.vibrate(VibrationEffect.createOneShot(ms, DEFAULT_AMPLITUDE)) }
+catch (_: Exception) {}
+```
+
+---
+
+## 4. Native render crash on some GPUs (Canvas game)
+
+**Symptom:** Java crash buffer empty, app dies; logs show `render engine as VK`
+(Vulkan). Hardware-accelerated custom `Canvas` view crashes on some OEM drivers.
+
+**Fix:** for a pure 2D `Canvas` game view use software rendering and guard
+`onDraw`:
+
+```kotlin
+init { setLayerType(LAYER_TYPE_SOFTWARE, null) }
+override fun onDraw(c: Canvas) { try { /* draw */ } catch (_: Exception) {} }
+```
+
+---
+
+## 5. Game timer fires instantly (now == 0)
+
+**Symptom:** Round/timer "expires" immediately on start.
+
+**Cause:** `now` field initialised to 0; `deadline = now + duration` is in the
+past relative to `SystemClock.uptimeMillis()`.
+
+**Fix:** read the clock at start, not a stale field:
+
+```kotlin
+fun startRound() {
+    val t = SystemClock.uptimeMillis(); now = t
+    deadline = t + duration
+}
+```
+
+---
+
+## 6. `BuildConfig` unresolved
+
+**Symptom:** `Unresolved reference 'BuildConfig'`.
+
+**Fix:** AGP 8+ doesn't generate it by default:
+```kotlin
+android { buildFeatures { buildConfig = true } }
+```
+Or just avoid it (log unconditionally with `Log.i`).
+
+---
+
+## 7. AppsFlyer listener registered too late (no attribution)
+
+**Symptom:** Attribution callback never fires; `awaitAttribution` times out.
+
+**Cause:** passing `null` to `init()` then calling
+`registerConversionListener` after `start()`.
+
+**Fix:** pass the listener INTO `init`, then `start`. Bridge to coroutine:
+
+```kotlin
+private val attribution = CompletableDeferred<Map<String, Any?>>()
+fun init() {
+    val l = object : AppsFlyerConversionListener {
+        override fun onConversionDataSuccess(d: MutableMap<String, Any?>) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val data = if ((d["af_status"]?.toString())
+                        .equals("Organic", true)) {
+                    delay(5_000); fetchGcd() ?: d        // false-organic fix
+                } else d
+                if (!attribution.isCompleted) attribution.complete(data)
+            }
+        }
+        override fun onConversionDataFail(e: String) {
+            if (!attribution.isCompleted) attribution.complete(emptyMap())
+        }
+        override fun onAppOpenAttribution(p: MutableMap<String,String>?) {}
+        override fun onAttributionFailure(p: String?) {
+            if (!attribution.isCompleted) attribution.complete(emptyMap())
+        }
+    }
+    AppsFlyerLib.getInstance().apply { init(key, l, ctx); start(ctx) }
+}
+suspend fun awaitAttribution(ms: Long) =
+    withTimeoutOrNull(ms) { attribution.await() } ?: emptyMap()
+```
+
+---
+
+## 8. Black "Android robot" screen on WebView load/exit
+
+**Symptom:** A black screen with the green Android icon flashes for a second
+when entering the WebView or when a network error occurs.
+
+**Causes & fixes:**
+- Launch preview window → use a theme with
+  `windowDisablePreview=true`, `windowBackground=@android:color/black`,
+  `windowAnimationStyle=@null`, black status/nav bars.
+- Native WebView error page → on a network `onReceivedError` (main frame),
+  immediately `view.stopLoading(); view.loadUrl("about:blank")` and navigate to
+  the offline screen with `overridePendingTransition(0,0)`.
+
+---
+
+## 9. Retry from offline screen shows a black WebView
+
+**Symptom:** Tapping Retry returns to a blank/black WebView.
+
+**Cause:** `StreamPortal` is `singleTask`; Retry reuses the existing instance
+via `onNewIntent`, but the WebView was set to `about:blank` when going offline,
+and `onNewIntent` only handled push URLs.
+
+**Fix:** in `onNewIntent` reload the stream URL when the current page is blank:
+```kotlin
+override fun onNewIntent(i: Intent) {
+    super.onNewIntent(i); setIntent(i); navigatedOffline = false
+    val target = i.getStringExtra(EXTRA_STREAM_URL) ?: vault.destinationUrl
+    val cur = wv.url
+    if (!target.isNullOrBlank() &&
+        (cur.isNullOrBlank() || cur == "about:blank" || cur != target))
+        wv.loadUrl(target)
+}
+```
+
+---
+
+## 10. Safe-area CSS kill breaks site button styling
+
+**Symptom:** Site buttons become thin/squashed after injecting safe-area CSS.
+
+**Cause:** a universal `*{padding-top:0!important;padding-bottom:0!important}`
+selector strips padding from every element.
+
+**Fix:** target ONLY root containers + safe-area CSS vars, never `*`:
+```css
+:root{--safe-area-inset-top:0px!important; --sat:0px!important; /* ...all vars */}
+html,body,#__nuxt,#__layout,#app,#root{padding-top:0!important;
+  padding-left:0!important;padding-right:0!important;margin-top:0!important;}
+```
+Re-apply on `pushState`/`replaceState`/`popstate` and a 2500ms interval.
+
+---
+
+## 11. No-WiFi screen never appears when page already loaded
+
+**Symptom:** Turning off internet while a page is loaded just freezes the site;
+no offline screen.
+
+**Cause:** no WebView request is in flight, so `onReceivedError` never fires;
+a capability-filtered `registerNetworkCallback` may not emit `onLost`.
+
+**Fix:** two layers —
+1. `registerDefaultNetworkCallback` with `onLost`/`onUnavailable` → emit false.
+2. A heartbeat coroutine in the WebView screen: every ~4s check
+   `isConnected()`; if false → go offline. Guard against double-navigation.
+
+---
+
+## 12. target="_blank" opens a slow external Chrome Custom Tab
+
+**Symptom:** Some links take ~20s (cold Chrome launch) and open outside the app.
+
+**Cause:** `target="_blank"` / `window.open` aren't handled → Android routes them
+to an external browser. Also `shouldOverrideUrlLoading` sent non-`http` schemes
+externally too eagerly.
+
+**Fix:**
+- `settings.setSupportMultipleWindows(true)` + override `onCreateWindow` to load
+  in the SAME WebView (`transport.webView = view; resultMsg.sendToTarget()`).
+- In `shouldOverrideUrlLoading` only externalize known app schemes
+  (`tel: mailto: sms: market: intent: whatsapp:`); everything else stays in
+  the WebView.
+
+---
+
+## 13. Mixed content blocked
+
+**Symptom:** Partner site assets (http on https page) don't load.
+
+**Fix:** `settings.mixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW` and a
+`network_security_config.xml` with `cleartextTrafficPermitted="true"`.
+
+---
+
+## 14. Loading bar fills before the app is ready; dots freeze
+
+**Symptom:** The splash progress bar reaches 100% before routing finishes; the
+"Loading..." dots stop animating.
+
+**Cause:** bar tied to a fixed `durationMs` timer; on completion the draw loop
+`return`s and stops invalidating.
+
+**Fix:** add an **indeterminate** mode for the routing splash — ease the bar
+toward ~92% (never 100%) with a moving shimmer, keep posting frames so the dots
+keep animating; navigate only when routing actually completes.
+
+---
+
+## 15. PNG in res/drawable* fails AAPT compile
+
+**Symptom:** `AAPT: error: file failed to compile` on a screen-art PNG.
+
+**Cause:** PNG with an ICC profile / non-standard chunks AAPT can't crunch.
+
+**Fix:** re-save as a clean 32-bit PNG via `System.Drawing`, or better convert
+the large full-screen art to **WebP** (also 10x smaller). Reference by resource
+name (`R.drawable.x`) — extension doesn't matter, so no code changes needed.
+
+---
+
+## 16. `gradlew installDebug` fails on a locked phone
+
+**Symptom:** `Can't open file: /data/local/tmp/app-debug.apk` /
+`INSTALL_FAILED`.
+
+**Cause:** Samsung blocks `/data/local/tmp` writes while the screen is locked.
+
+**Fix:** install via streaming instead:
+`adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+
+---
+
+## 17. Skip button invisible on a colorful permission screen
+
+**Fix:** give the secondary button real contrast — dark translucent fill
+(`#CC101012`), 2dp gold stroke, gold bold text with a black shadow layer.
+Don't rely on plain white text over a bright background.
+
+---
+
+## 18. Misc
+
+- `Locale` import: use `java.util.Locale`, not `android.os.Locale`.
+- `intArrayOf<Int>()` is invalid — write `intArrayOf()`.
+- `applicationContext as AppEntry` requires `android:name=".startup.AppEntry"`
+  on `<application>` in the manifest.
+- Logs hidden behind `BuildConfig.DEBUG` may not show when debugging release-like
+  builds — during bring-up log with `Log.i` and verbose request/response bodies
+  in ReachDispatch/TrackingDispatch so the gray decision is traceable.

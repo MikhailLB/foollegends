@@ -1,0 +1,93 @@
+---
+description: Per-project binary fingerprint uniqueness for Kotlin gray-part apps. MANDATORY when cloning this template into a new app — avoids cross-submission patterns that get whole developer accounts banned.
+globs: app/src/main/java/**/*.kt,app/build.gradle.kts,settings.gradle.kts
+alwaysApply: false
+---
+
+# Kotlin Gray-Part — Per-Project Fingerprint
+
+Stores scan for structural patterns shared across submissions from the same
+developer. If two apps share folder names, class names, the codec seed, or
+identical code blocks, **all related accounts can be banned in a chain**. Every
+new project MUST be diversified. Never copy 1:1.
+
+---
+
+## Mandatory changes per project
+
+1. **Codec seed + mixing formula** (`CipherVault`):
+   - Change the seed phrase bytes AND the key-mixing formula
+     (e.g. `i*37+13` → a different affine formula), then **re-encode every
+     secret** (config URL, AppsFlyer key, Firebase #, GCD base) with the new
+     scheme. The encoded `intArrayOf(...)` values must change.
+2. **Package + folder layout** — rename the functional packages. Don't reuse
+   `startup/portal/reach/signal/vault/wire/blueprint`. Pick a different metaphor
+   per project (e.g. `boot/surface/relay/...` → next app: `core/screens/net/...`).
+3. **Class names** — rename the key classes. Reference mapping used here (pick
+   different names next time):
+   | Role | This project | Vary next time |
+   |------|--------------|----------------|
+   | Application | `AppEntry` | e.g. `RootApp` |
+   | Router/splash | `WelcomePortal` | e.g. `BootGate` |
+   | WebView host | `StreamPortal` | e.g. `ShellView` |
+   | Push permission | `AlertPortal` | e.g. `OptInScreen` |
+   | Offline screen | `OfflinePortal` | e.g. `NoNetScreen` |
+   | Config client | `ReachDispatch` | e.g. `ConfigClient` |
+   | AppsFlyer | `TrackingDispatch` | e.g. `AttributionHub` |
+   | FCM service | `PushRelay` | e.g. `FcmReceiver` |
+   | Storage | `DataVault` | e.g. `Prefs` |
+   | XOR codec | `CipherVault` | e.g. `StrCodec` |
+   | Connectivity | `NetWire` | e.g. `NetMon` |
+   | Config facade | `AppBlueprint` | e.g. `Env` |
+4. **Library versions** — stagger minor versions between projects (OkHttp,
+   AppsFlyer SDK, Firebase BOM, security-crypto, coroutines). Don't ship the
+   exact same dependency set.
+5. **Storage keys** — change SharedPreferences/EncryptedSharedPreferences file
+   names and key strings (`fl_state`, `fl_enc`, `dest_u`, `run_ch`, ...).
+6. **FCM channel id** + notification icon shape — unique per project
+   (`fl_bonus_channel` → something else; flame → different monochrome glyph).
+7. **Implementation variation** — don't paste identical method bodies. Vary the
+   approach where behavior allows (e.g. connectivity via NetworkCallback vs.
+   poll; JSON via org.json vs. kotlinx.serialization; OkHttp vs. HttpURLConnection).
+8. **Resource names** — gray screen drawables, button drawables, theme names.
+
+---
+
+## Encode secrets with the project's own scheme
+
+Use the same formula the runtime `CipherVault` decodes with. Example
+(PowerShell — verify by decoding back before committing):
+
+```powershell
+$seed = [byte[]]@(...project seed bytes...)
+$n = $seed.Length
+$enc = for ($i=0; $i -lt $s.Length; $i++) {
+  $c=[byte][char]$s[$i]; $m=[byte](($i*37+13) -band 0xFF)  # match runtime formula
+  ($c -bxor $seed[$i % $n] -bxor $m) -band 0xFF
+}
+```
+Always decode-verify the produced array equals the original string.
+
+---
+
+## Do NOT hide (breaks functionality)
+
+| Item | Why it must stay visible |
+|------|--------------------------|
+| `INTERNET`, `ACCESS_NETWORK_STATE` perms | no network otherwise |
+| `POST_NOTIFICATIONS` perm | system push dialog won't appear on API 33+ |
+| FCM service + channel meta-data | pushes silently dropped |
+| `adjustResize` | keyboard covers inputs |
+| `google-services.json` | Firebase init fails |
+| App Check activate | config requests rejected (403) |
+| `networkSecurityConfig` cleartext | http partner content blocked |
+
+---
+
+## Release hygiene
+
+- `debugForceStreamUrl` MUST be empty in release.
+- No `applicationIdSuffix` (breaks attribution — see pitfalls #1).
+- Build `--obfuscate`-equivalent: R8/minify enabled in release (it is in the
+  template). Keep `proguard-rules.pro` keeping Firebase/AppsFlyer/WebView.
+- Keystore + `keystore.properties` are gitignored; never commit them.

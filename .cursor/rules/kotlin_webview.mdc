@@ -1,0 +1,158 @@
+---
+description: WebView shell requirements for native Kotlin gray-part apps — User-Agent, safe-area, keyboard, redirects, file upload, autoplay, push routing, back navigation, offline detection. Read when implementing or fixing the StreamPortal WebView.
+globs: app/src/main/java/**/portal/*.kt,app/src/main/java/**/signal/*.kt
+alwaysApply: false
+---
+
+# Kotlin Gray-Part — WebView Shell Spec
+
+The WebView host (`StreamPortal`) must satisfy every TZ requirement below.
+
+---
+
+## WebSettings (baseline)
+
+```kotlin
+settings.apply {
+    javaScriptEnabled = true                 // sites need JS
+    domStorageEnabled = true                 // sessions / localStorage
+    allowFileAccess = true
+    allowContentAccess = true
+    mediaPlaybackRequiresUserGesture = false // inline autoplay video
+    mixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW
+    cacheMode = LOAD_DEFAULT
+    setSupportMultipleWindows(true)          // target="_blank" handled in-app
+    javaScriptCanOpenWindowsAutomatically = true
+    userAgentString = buildUserAgent()       // see below
+}
+CookieManager.getInstance().apply {
+    setAcceptCookie(true)
+    setAcceptThirdPartyCookies(webView, true) // cookies / sessions
+}
+```
+
+Activity in manifest: `windowSoftInputMode="adjustResize"`,
+`hardwareAccelerated="true"`, `launchMode="singleTask"`,
+`configChanges="orientation|screenSize|keyboardHidden|uiMode"`,
+`screenOrientation="sensor"`.
+
+---
+
+## User-Agent
+
+- Must NOT reveal a WebView (`; wv`) and must reflect the real device.
+- For Zeus/Magma-style projects append the app identity suffix
+  `appid/<bundleId> appname/<AppNamePascalCase>` as the LAST segment, used by
+  BOTH the WebView and the OkHttp config client.
+
+```kotlin
+val base = "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}; " +
+    "${Build.BRAND} ${Build.MODEL.replace(" ","_")} Build/${Build.ID}) " +
+    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+    "Chrome/131.0.6778.135 Mobile Safari/537.36"
+return "$base appid/$bundleId appname/$appNameToken"
+```
+
+---
+
+## Safe area (notch / cutout) — required in BOTH orientations
+
+- Manifest/window: `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`.
+- Apply padding via `setOnApplyWindowInsetsListener`:
+  - **portrait** → top inset (status bar + top notch),
+  - **landscape** → left + right insets (side cameras).
+- Re-apply on `onConfigurationChanged` and after lock/unlock.
+- The CSS safe-area kill in the page is SEPARATE and must NOT use `*` selectors
+  (see pitfalls #10) — only `:root` vars + named root containers.
+
+---
+
+## Keyboard must not cover inputs (3 layers, all required)
+
+1. Manifest: `windowSoftInputMode="adjustResize"` (not adjustPan).
+2. Don't fight it from native layout (no manual resize on top of adjustResize).
+3. JS inject: on `focusin` + `visualViewport.resize`, after ~350ms
+   `el.scrollIntoView({behavior:'auto', block:'center'})` — `auto`, never
+   `smooth` (smooth fights the keyboard animation and causes jitter).
+
+---
+
+## Redirect loop (ERR_TOO_MANY_REDIRECTS)
+
+Track the last main-frame URL in `shouldOverrideUrlLoading`. On
+`onReceivedError` for the main frame with code `-9`/`-1007` or
+"too_many_redirects", reload the last URL, up to 3 times, before giving up.
+
+---
+
+## shouldOverrideUrlLoading routing
+
+```kotlin
+when {
+    u.startsWith("http") || u.startsWith("about") ||
+    u.startsWith("data") || u.startsWith("blob") -> false  // stay in WebView
+    u.startsWith("tel:") || u.startsWith("mailto:") || u.startsWith("sms:") ||
+    u.startsWith("market:") || u.startsWith("intent:") ||
+    u.startsWith("whatsapp:") -> { startActivity(VIEW intent); true }
+    else -> false  // unknown → keep in WebView (don't bounce to Chrome)
+}
+```
+Deep links the WebView can't handle: catch and hand to the system via
+`Intent.ACTION_VIEW`, then keep the user on the previous page so they don't see
+an error on return.
+
+---
+
+## target="_blank" / window.open
+
+`onCreateWindow` must load into the SAME WebView (never spawn an external tab):
+```kotlin
+override fun onCreateWindow(view: WebView, dialog: Boolean,
+        gesture: Boolean, msg: Message): Boolean {
+    (msg.obj as? WebView.WebViewTransport)?.apply {
+        webView = view; msg.sendToTarget()
+    }
+    return true
+}
+```
+
+---
+
+## File upload (no storage permission)
+
+`WebChromeClient.onShowFileChooser` → launch `params.createIntent()` via an
+`ActivityResultContracts.StartActivityForResult` launcher, return the result
+with `FileChooserParams.parseResult`. Camera/gallery work through the chooser.
+
+---
+
+## Back navigation
+
+`OnBackPressedCallback`: if `webView.canGoBack()` → `goBack()`, else do nothing
+(back on the first page must NOT close the app). System back + gestures both
+route through this.
+
+---
+
+## Offline detection (see pitfalls #11)
+
+- `NetWire.connectivityFlow` via `registerDefaultNetworkCallback`
+  (`onLost`/`onUnavailable` → false) collected in the WebView screen.
+- A ~4s heartbeat that checks `isConnected()` for the "page already loaded, then
+  internet dropped" case.
+- On offline: blank the WebView (`about:blank`) then open OfflinePortal with the
+  current URL as the return target. Retry reloads it (handle in `onNewIntent`).
+
+---
+
+## Push URL into the WebView (one-time)
+
+- `PushBus.onWarmUrl` is set in `StreamPortal.onStart`, cleared in
+  `onStop`/`onDestroy`.
+- `PushRelay.onMessageReceived`: if `PushBus.onWarmUrl != null` and the payload
+  has a `url` → call it (loads into the live WebView) and DON'T show a
+  notification / DON'T persist. Otherwise save `coldPushUrl` and post a
+  notification.
+- Cold start: `WelcomePortal` consumes `coldPushUrl` BEFORE the state machine
+  and opens the WebView on it. Warm tap while running → `onNewIntent` loads it.
+- Never persist a push URL beyond its one-time use.

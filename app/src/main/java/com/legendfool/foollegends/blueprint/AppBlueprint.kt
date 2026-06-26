@@ -27,12 +27,15 @@ object AppBlueprint {
         54, 54, 34, 148, 182, 229
     )
 
-    // AppsFlyer dev key — fill after receiving key
-    // Encode with: CipherVault.reveal(encoded) must return the dev key
-    private val trackerKeyObs = intArrayOf() // TODO: fill after AppsFlyer key received
+    // AppsFlyer dev key: "LMTBWoGkhUJXippZVcPNMf" — XOR-encoded, CipherVault seed "FoolsGold@26#X"
+    private val trackerKeyObs = intArrayOf(
+        7, 16, 108, 82, 133, 238, 195, 23, 57, 79, 7, 202, 131, 198, 37, 13, 100, 141, 132, 197, 211, 28
+    )
 
-    // Firebase project number — fill after receiving Firebase credentials
-    private val analyticsProjectObs = intArrayOf() // TODO: fill after Firebase setup
+    // Firebase project number: "1040007503051"
+    private val analyticsProjectObs = intArrayOf(
+        122, 109, 12, 32, 226, 177, 179, 73, 97, 41, 125, 167, 219
+    )
 
     @JvmStatic
     fun resolveConfigEndpoint(): String = CipherVault.reveal(configEndpointObs)

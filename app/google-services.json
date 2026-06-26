@@ -1,31 +1,47 @@
 {
   "project_info": {
-    "project_number": "000000000000",
-    "project_id": "fool-legends-placeholder",
-    "storage_bucket": "fool-legends-placeholder.appspot.com"
+    "project_number": "1040007503051",
+    "project_id": "foollegends",
+    "storage_bucket": "foollegends.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000001",
+        "mobilesdk_app_id": "1:1040007503051:android:745f0049e5d538a0dfcf4e",
         "android_client_info": {
           "package_name": "com.legendfool.foollegends"
         }
       },
       "oauth_client": [],
-      "api_key": [{ "current_key": "placeholder_replace_with_real" }],
-      "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+      "api_key": [
+        {
+          "current_key": "AIzaSyBSG1NAo_L2OL2ExYXHiS_q5Z1LzsnExM8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000002",
+        "mobilesdk_app_id": "1:1040007503051:android:745f0049e5d538a0dfcf4e",
         "android_client_info": {
           "package_name": "com.legendfool.foollegends.debug"
         }
       },
       "oauth_client": [],
-      "api_key": [{ "current_key": "placeholder_replace_with_real" }],
-      "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+      "api_key": [
+        {
+          "current_key": "AIzaSyBSG1NAo_L2OL2ExYXHiS_q5Z1LzsnExM8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
     }
   ],
   "configuration_version": "1"

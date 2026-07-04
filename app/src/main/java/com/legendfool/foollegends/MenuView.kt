@@ -22,7 +22,6 @@ import kotlin.math.sin
 class MenuView(context: Context) : View(context) {
 
     private val prefs = context.getSharedPreferences("fool_legends", Context.MODE_PRIVATE)
-    private val joker  = decode(R.drawable.joker_normal)
 
     // Paints.
     private val fill   = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -51,19 +50,13 @@ class MenuView(context: Context) : View(context) {
 
     init { setLayerType(LAYER_TYPE_SOFTWARE, null) }
 
-    private fun decode(id: Int): Bitmap =
-        (resources.getDrawable(id, null) as? BitmapDrawable)?.bitmap
-            ?: BitmapFactory.decodeResource(resources, id)
-
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         vw = w.toFloat(); vh = h.toFloat(); pad = w * 0.06f
 
-        // Joker — large upper area.
-        val jMaxW = w * 0.72f; val jMaxH = h * 0.32f
-        val jSc = min(jMaxW / joker.width, jMaxH / joker.height)
-        val jW = joker.width * jSc; val jH = joker.height * jSc
-        val jTop = h * 0.040f
-        jokerDst.set((w - jW) / 2f, jTop, (w + jW) / 2f, jTop + jH)
+        // Jester — square area in the upper part.
+        val jSize = min(w * 0.62f, h * 0.30f)
+        val jTop = h * 0.045f
+        jokerDst.set((w - jSize) / 2f, jTop, (w + jSize) / 2f, jTop + jSize)
 
         // PLAY button — wide, tall, golden.
         val pbW = w * 0.72f; val pbH = h * 0.088f
@@ -121,12 +114,12 @@ class MenuView(context: Context) : View(context) {
 
     private fun drawJoker(c: Canvas) {
         val cx = jokerDst.centerX(); val cy = jokerDst.centerY(); val r = jokerDst.width() * 0.5f
-        // Warm glow behind the joker.
+        // Warm glow behind the jester.
         fill.shader = RadialGradient(cx, cy, r, 0x60FFB830, 0x00000000, Shader.TileMode.CLAMP)
         c.drawCircle(cx, cy, r, fill)
         fill.shader = null
-        // Joker bitmap — bitmapPaint is always opaque white (filter only).
-        c.drawBitmap(joker, null, jokerDst, bitmapPaint)
+        // Procedurally drawn jester (no bitmap asset).
+        JesterArtist.draw(c, cx, cy, min(jokerDst.width(), jokerDst.height()), JesterArtist.Mood.NORMAL)
     }
 
     private fun drawTitle(c: Canvas) {

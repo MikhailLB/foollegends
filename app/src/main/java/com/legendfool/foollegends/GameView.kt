@@ -35,9 +35,6 @@ class GameView(context: Context) : View(context) {
     private val prefs = context.getSharedPreferences("fool_legends", Context.MODE_PRIVATE)
     private val rnd = Random.Default
 
-    private val jokerNormal = decode(R.drawable.joker_normal)
-    private val jokerAngry  = decode(R.drawable.joker_angry)
-    private val jokerFun    = decode(R.drawable.joker_fun)
     private val vibrator    = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
     private val fill   = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -308,18 +305,18 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun drawJoker(c: Canvas) {
-        val t = (now - stateStart).toFloat()
         val lowTime = state == State.PLAY && (deadline - now).toFloat() / round.timeMs < 0.28f
-        val bmp = when { state == State.GAMEOVER -> jokerFun; lowTime -> jokerAngry; else -> jokerNormal }
+        val mood = when {
+            state == State.GAMEOVER -> JesterArtist.Mood.FUN
+            lowTime -> JesterArtist.Mood.ANGRY
+            else -> JesterArtist.Mood.NORMAL
+        }
         fill.shader = RadialGradient(jokerRect.centerX(), jokerRect.centerY(), jokerRect.width() * 0.62f,
             (if (lowTime) 0x44FF453A else 0x40FFD777), 0x00000000, Shader.TileMode.CLAMP)
         c.drawCircle(jokerRect.centerX(), jokerRect.centerY(), jokerRect.width() * 0.62f, fill)
         fill.shader = null
-        val s = min(jokerRect.width() / bmp.width, jokerRect.height() / bmp.height)
-        val dw = bmp.width * s; val dh = bmp.height * s
-        c.drawBitmap(bmp, null,
-            RectF(jokerRect.centerX() - dw / 2f, jokerRect.centerY() - dh / 2f,
-                  jokerRect.centerX() + dw / 2f, jokerRect.centerY() + dh / 2f), fill)
+        JesterArtist.draw(c, jokerRect.centerX(), jokerRect.centerY(),
+            min(jokerRect.width(), jokerRect.height()), mood)
     }
 
     private fun drawWordCard(c: Canvas) {
@@ -390,11 +387,7 @@ class GameView(context: Context) : View(context) {
         fill.color = 0xD0000000.toInt()
         c.drawRect(0f, 0f, vw, vh, fill)
 
-        val bmp = jokerFun
-        val sc = min(vw * 0.70f / bmp.width, vh * 0.28f / bmp.height)
-        val dw = bmp.width * sc; val dh = bmp.height * sc
-        c.drawBitmap(bmp, null,
-            RectF(vw / 2f - dw / 2f, vh * 0.15f, vw / 2f + dw / 2f, vh * 0.15f + dh), fill)
+        JesterArtist.draw(c, vw / 2f, vh * 0.28f, min(vw * 0.62f, vh * 0.34f), JesterArtist.Mood.FUN)
 
         txt(c, "FOOLED!",      vw / 2f, vh * 0.54f, vh * 0.072f, vw * 0.86f, redBad, black, true)
         txt(c, "Level reached",vw / 2f, vh * 0.60f, vh * 0.025f, vw * 0.8f,  muted,  medium)

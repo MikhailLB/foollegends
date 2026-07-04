@@ -9,3 +9,6 @@ keystore/*.jks.old
 .DS_Store
 captures/
 .cxx/
+
+.kotlin/
+hs_err_pid*.log

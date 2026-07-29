@@ -72,21 +72,25 @@ class StrongBox(ctx: Context) {
 
     fun takeChilledPush(): String? = chilledPushUrl?.also { chilledPushUrl = null }
 
+    /** Skip: the promo is due again once this passes. */
     var heraldSkipUntil: Long
         get() = flags.getLong(K_HERALD_SKIP, 0L)
         set(v) = flags.edit().putLong(K_HERALD_SKIP, v).apply()
 
-    var heraldGranted: Boolean
-        get() = flags.getBoolean(K_HERALD_OK, false)
-        set(v) = flags.edit().putBoolean(K_HERALD_OK, v).apply()
-
-    /** System-level refusal: the OS dialog will never open again, so never re-ask. */
-    var heraldBlockedByOs: Boolean
-        get() = flags.getBoolean(K_HERALD_OS_NO, false)
-        set(v) = flags.edit().putBoolean(K_HERALD_OS_NO, v).apply()
+    /**
+     * Accept: the promo has said what it had to say and is never shown again.
+     *
+     * Which way the system dialog behind it is answered makes no difference here. A
+     * permission granted needs no more asking, and one refused cannot be asked for
+     * again — Android opens that dialog once per install and stays silent afterwards,
+     * so a promo leading to it would only be a button that does nothing.
+     */
+    var heraldClosed: Boolean
+        get() = flags.getBoolean(K_HERALD_CLOSED, false)
+        set(v) = flags.edit().putBoolean(K_HERALD_CLOSED, v).apply()
 
     fun shouldOfferHerald(): Boolean {
-        if (heraldGranted || heraldBlockedByOs) return false
+        if (heraldClosed) return false
         return System.currentTimeMillis() / 1000 >= heraldSkipUntil
     }
 
@@ -124,8 +128,7 @@ class StrongBox(ctx: Context) {
         private const val K_LANDING_EXP = "land_x"
         private const val K_PUSH_COLD = "pc_url"
         private const val K_HERALD_SKIP = "hs_skip"
-        private const val K_HERALD_OK = "hs_ok"
-        private const val K_HERALD_OS_NO = "hs_no"
+        private const val K_HERALD_CLOSED = "hs_done"
         private const val K_TOKEN = "tok_f"
         private const val K_KB_TALL = "kb_t"
         private const val K_KB_WIDE = "kb_w"

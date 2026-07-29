@@ -10,6 +10,7 @@ import com.legendfool.foollegends.MainActivity
 import com.legendfool.foollegends.beacon.BeaconBus
 import com.legendfool.foollegends.charter.AppCharter
 import com.legendfool.foollegends.charter.GateVerdict
+import com.legendfool.foollegends.chronicle.Chronicle
 import com.legendfool.foollegends.courier.AgentSignature
 import com.legendfool.foollegends.courier.ScoutCourier
 import com.legendfool.foollegends.pulse.PulseMeter
@@ -142,17 +143,17 @@ class GateKeeper : AppCompatActivity() {
 
         when (box.mode) {
             StrongBox.MODE_APP -> {
-                Log.i(TAG, "mode=app -> game")
+                Chronicle.note(TAG, "mode=app -> game")
                 openGame()
             }
 
             StrongBox.MODE_WEB -> {
-                Log.i(TAG, "mode=web -> refresh")
+                Chronicle.note(TAG, "mode=web -> refresh")
                 resumeWeb()
             }
 
             else -> {
-                Log.i(TAG, "mode=unset -> first decision")
+                Chronicle.note(TAG, "mode=unset -> first decision")
                 firstDecision()
             }
         }
@@ -176,13 +177,14 @@ class GateKeeper : AppCompatActivity() {
         courier().ignite(this)
         courier().retrace(this)
         val conversion = courier().awaitAttribution(AppCharter.traceFirstMs)
-        Log.i(TAG, "conversion=$conversion")
+        Chronicle.note(TAG, "conversion=$conversion")
 
         val verdict = askGate(conversion)
         if (verdict.granted && !verdict.landing.isNullOrBlank()) {
             box.mode = StrongBox.MODE_WEB
             box.landingUrl = verdict.landing
             box.landingExpiresAt = verdict.expiresAt
+            Chronicle.note(TAG, "gate granted -> web")
             openWeb(verdict.landing)
         } else {
             // A "no" sticks for the life of the install, so it has to be a real one:
@@ -193,12 +195,15 @@ class GateKeeper : AppCompatActivity() {
             // for the next launch instead of being closed on a technicality.
             when {
                 !verdict.answered ->
-                    Log.w(TAG, "endpoint unreachable -> game, decision left open")
+                    Chronicle.warn(TAG, "endpoint unreachable -> game, decision left open")
 
                 conversion.isEmpty() ->
-                    Log.w(TAG, "no attribution behind the answer -> game, decision left open")
+                    Chronicle.warn(TAG, "no attribution behind the answer -> game, decision left open")
 
-                else -> box.mode = StrongBox.MODE_APP
+                else -> {
+                    box.mode = StrongBox.MODE_APP
+                    Chronicle.warn(TAG, "gate refused with attribution in hand -> game for good")
+                }
             }
             openGame()
         }
@@ -216,21 +221,23 @@ class GateKeeper : AppCompatActivity() {
         courier().ignite(this)
         courier().retrace(this)
         val conversion = courier().awaitAttribution(AppCharter.traceReturnMs)
+        Chronicle.note(TAG, "conversion=$conversion")
         val verdict = askGate(conversion)
         when {
             verdict.granted && !verdict.landing.isNullOrBlank() -> {
                 box.landingUrl = verdict.landing
                 box.landingExpiresAt = verdict.expiresAt
+                Chronicle.note(TAG, "gate granted -> web")
                 openWeb(verdict.landing)
             }
 
             !stored.isNullOrBlank() -> {
-                Log.i(TAG, "endpoint gave nothing, reusing stored landing")
+                Chronicle.note(TAG, "endpoint gave nothing, reusing stored landing")
                 openWeb(stored)
             }
 
             else -> {
-                Log.i(TAG, "no landing available -> offline screen")
+                Chronicle.warn(TAG, "no landing available -> offline screen")
                 openVoid(null)
             }
         }

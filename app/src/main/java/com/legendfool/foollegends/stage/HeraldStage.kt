@@ -15,9 +15,9 @@ import com.legendfool.foollegends.R
 import com.legendfool.foollegends.strongbox.StrongBox
 
 /**
- * Push-permission promo shown once before the WebView. Accept opens the system
- * dialog; Skip postpones the screen for three days. A system-level refusal is
- * recorded permanently, because after it the OS dialog never opens again.
+ * Push-permission promo shown before the WebView. Skip postpones it for three days;
+ * Accept hands the user the system dialog and retires the promo for good, whichever
+ * way that dialog is answered — see [StrongBox.heraldClosed].
  */
 class HeraldStage : AppCompatActivity() {
 
@@ -26,18 +26,7 @@ class HeraldStage : AppCompatActivity() {
 
     private val permission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            box.heraldGranted = true
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
-        ) {
-            box.heraldBlockedByOs = true
-        } else {
-            box.postponeHerald()
-        }
-        moveOn()
-    }
+    ) { moveOn() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,20 +47,19 @@ class HeraldStage : AppCompatActivity() {
     }
 
     private fun requestPush() {
+        // Written before the dialog opens rather than once it answers: the answer does
+        // not change what happens to this screen, and the app can be swiped away while
+        // the dialog is up — which would leave the promo due again, over a permission
+        // the user has already been asked for.
+        box.heraldClosed = true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            box.heraldGranted = true
             moveOn()
             return
         }
         val already = ContextCompat.checkSelfPermission(
             this, Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
-        if (already) {
-            box.heraldGranted = true
-            moveOn()
-        } else {
-            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        if (already) moveOn() else permission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun moveOn() {

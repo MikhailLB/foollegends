@@ -7,6 +7,7 @@ import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 import com.legendfool.foollegends.BuildConfig
+import com.legendfool.foollegends.chronicle.Chronicle
 import com.legendfool.foollegends.courier.TraceCourier
 
 class JesterApp : Application() {
@@ -16,6 +17,10 @@ class JesterApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // First thing of all: the attribution answer can arrive before the launcher
+        // has drawn a frame, and a diary opened after it has nothing to say about it.
+        Chronicle.open(this)
 
         try {
             FirebaseApp.initializeApp(this)

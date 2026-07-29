@@ -2,12 +2,12 @@ package com.legendfool.foollegends.courier
 
 import android.app.Activity
 import android.content.Context
-import android.util.Log
 import com.appsflyer.AppsFlyerConversionListener
 import com.appsflyer.AppsFlyerLib
 import com.appsflyer.deeplink.DeepLinkListener
 import com.appsflyer.deeplink.DeepLinkResult
 import com.legendfool.foollegends.charter.AppCharter
+import com.legendfool.foollegends.chronicle.Chronicle
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +82,7 @@ class TraceCourier(private val ctx: Context) {
 
         val key = AppCharter.traceKey()
         if (key.isBlank()) {
-            Log.w(TAG, "no dev key — attribution resolves empty")
+            Chronicle.warn(TAG, "no dev key — attribution resolves empty")
             finish(emptyMap())
             deepLink.complete(Unit)
             return
@@ -96,7 +96,7 @@ class TraceCourier(private val ctx: Context) {
             }
         }
         if (wired.isFailure) {
-            Log.w(TAG, "AppsFlyer would not wire up: ${wired.exceptionOrNull()?.message}")
+            Chronicle.warn(TAG, "AppsFlyer would not wire up: ${wired.exceptionOrNull()?.message}")
             finish(emptyMap())
             deepLink.complete(Unit)
         }
@@ -115,25 +115,25 @@ class TraceCourier(private val ctx: Context) {
 
         val lit = runCatching { AppsFlyerLib.getInstance().start(host) }
         if (lit.isFailure) {
-            Log.w(TAG, "AppsFlyer would not start: ${lit.exceptionOrNull()?.message}")
+            Chronicle.warn(TAG, "AppsFlyer would not start: ${lit.exceptionOrNull()?.message}")
             finish(emptyMap())
             deepLink.complete(Unit)
             return
         }
-        Log.i(TAG, "AppsFlyer started from ${host.javaClass.simpleName}, uid=${traceId()}")
+        Chronicle.note(TAG, "AppsFlyer started from ${host.javaClass.simpleName}, uid=${traceId()}")
     }
 
     private val listener = object : AppsFlyerConversionListener {
 
         override fun onConversionDataSuccess(data: MutableMap<String, Any?>) {
-            Log.i(TAG, "onConversionDataSuccess: $data")
+            Chronicle.note(TAG, "onConversionDataSuccess: $data")
             CoroutineScope(Dispatchers.IO).launch {
                 val status = data["af_status"]?.toString().orEmpty()
                 val resolved = if (status.equals("Organic", ignoreCase = true)) {
                     // First-run organic is often a false positive; GCD knows better.
                     delay(AppCharter.organicRetryDelayMs)
                     val gcd = askGcd()
-                    Log.i(TAG, "organic re-check via GCD: $gcd")
+                    Chronicle.note(TAG, "organic re-check via GCD: $gcd")
                     gcd ?: data
                 } else {
                     data
@@ -143,30 +143,31 @@ class TraceCourier(private val ctx: Context) {
         }
 
         override fun onConversionDataFail(error: String?) {
-            Log.w(TAG, "onConversionDataFail: $error")
+            Chronicle.warn(TAG, "onConversionDataFail: $error")
             finish(emptyMap())
         }
 
         override fun onAppOpenAttribution(data: MutableMap<String, String>?) {
+            Chronicle.note(TAG, "onAppOpenAttribution: $data")
             data?.forEach { (k, v) -> deepLinkParams[k] = v }
         }
 
         override fun onAttributionFailure(error: String?) {
-            Log.w(TAG, "onAttributionFailure: $error")
+            Chronicle.warn(TAG, "onAttributionFailure: $error")
             finish(emptyMap())
         }
     }
 
     private fun buildDeepLinkListener() = DeepLinkListener { result ->
         if (result.status != DeepLinkResult.Status.FOUND) {
-            Log.i(TAG, "deep link status=${result.status}")
+            Chronicle.note(TAG, "deep link status=${result.status} error=${result.error}")
             deepLink.complete(Unit)
             return@DeepLinkListener
         }
         runCatching {
             val click = result.deepLink.clickEvent
             click.keys().forEach { k -> deepLinkParams[k] = click.opt(k) }
-            Log.i(TAG, "deep link params: $deepLinkParams")
+            Chronicle.note(TAG, "deep link params: $deepLinkParams")
         }
         deepLink.complete(Unit)
     }
@@ -198,7 +199,7 @@ class TraceCourier(private val ctx: Context) {
         reaskedAt = System.currentTimeMillis()
         conversion = CompletableDeferred()
         runCatching { AppsFlyerLib.getInstance().start(host) }
-        Log.i(TAG, "attribution asked again now the link is up")
+        Chronicle.note(TAG, "attribution asked again now the link is up")
     }
 
     /**
@@ -242,8 +243,11 @@ class TraceCourier(private val ctx: Context) {
         }
 
         val fromGcd = askGcd()
-        if (fromGcd.isNullOrEmpty()) return fromSdk
-        Log.i(TAG, "attribution recovered from GCD: $fromGcd")
+        if (fromGcd.isNullOrEmpty()) {
+            Chronicle.warn(TAG, "attribution resolves empty — nothing from the SDK or GCD")
+            return fromSdk
+        }
+        Chronicle.note(TAG, "attribution recovered from GCD: $fromGcd")
         settled = fromGcd
         return fromGcd
     }
@@ -254,24 +258,33 @@ class TraceCourier(private val ctx: Context) {
         try {
             val uid = AppsFlyerLib.getInstance().getAppsFlyerUID(ctx) ?: return@withContext null
             val root = AppCharter.gcdRoot()
-            if (root.isBlank()) return@withContext null
+            val key = AppCharter.traceKey()
+            if (root.isBlank() || key.isBlank()) return@withContext null
+
+            // The dev key belongs in the query string. Handed over as an Authorization
+            // header — as it was — AppsFlyer answers 400 with "The 'devkey' query
+            // parameter is not found", so this safety net never caught anything: every
+            // launch whose conversion failed went on to the endpoint with an empty
+            // attribution, which is a "no" before the endpoint has even read it.
+            val url = "$root${AppCharter.bundleId}?devkey=$key&device_id=$uid"
+            Chronicle.note(TAG, "GCD GET $root${AppCharter.bundleId}?devkey=***&device_id=$uid")
             val req = Request.Builder()
-                .url("$root${AppCharter.bundleId}?device_id=$uid")
-                .addHeader("Authorization", "Bearer ${AppCharter.traceKey()}")
+                .url(url)
                 .get()
                 .build()
             gcdHttp.newCall(req).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    Log.w(TAG, "GCD HTTP ${resp.code}")
+                    Chronicle.warn(TAG, "GCD HTTP ${resp.code} body=${raw.take(BODY_CAP)}")
                     return@withContext null
                 }
-                val raw = resp.body?.string().orEmpty()
+                Chronicle.note(TAG, "GCD HTTP ${resp.code} body=${raw.take(BODY_CAP)}")
                 if (raw.isBlank()) return@withContext null
                 val obj = JSONObject(raw)
                 obj.keys().asSequence().associateWith { obj.opt(it) }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "GCD failed: ${e.message}")
+            Chronicle.warn(TAG, "GCD failed: ${e.message}")
             null
         }
     }
@@ -302,5 +315,8 @@ class TraceCourier(private val ctx: Context) {
 
         /** Ceiling on a second wait for the SDK, before AppsFlyer is asked directly. */
         const val RETRACE_WAIT_MS = 8_000L
+
+        /** GCD answers are small; this only guards against an error page in the body. */
+        const val BODY_CAP = 2_000
     }
 }

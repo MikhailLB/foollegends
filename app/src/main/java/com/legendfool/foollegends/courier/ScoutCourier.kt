@@ -1,8 +1,8 @@
 package com.legendfool.foollegends.courier
 
-import android.util.Log
 import com.legendfool.foollegends.charter.AppCharter
 import com.legendfool.foollegends.charter.GateVerdict
+import com.legendfool.foollegends.chronicle.Chronicle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -28,13 +28,13 @@ class ScoutCourier(private val userAgent: String) {
     suspend fun askGate(payload: JSONObject): GateVerdict = withContext(Dispatchers.IO) {
         val endpoint = AppCharter.landingEndpoint()
         if (endpoint.isBlank()) {
-            Log.w(TAG, "endpoint missing -> app mode")
+            Chronicle.warn(TAG, "endpoint missing -> app mode")
             return@withContext GateVerdict.unreachable()
         }
 
-        Log.i(TAG, "POST $endpoint")
-        Log.i(TAG, "UA  $userAgent")
-        Log.i(TAG, "body $payload")
+        Chronicle.note(TAG, "POST $endpoint")
+        Chronicle.note(TAG, "UA  $userAgent")
+        Chronicle.note(TAG, "body $payload")
 
         try {
             val req = Request.Builder()
@@ -46,13 +46,13 @@ class ScoutCourier(private val userAgent: String) {
 
             http.newCall(req).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
-                Log.i(TAG, "HTTP ${resp.code} body=${raw.take(500)}")
+                Chronicle.note(TAG, "HTTP ${resp.code} body=${raw.take(BODY_CAP)}")
                 if (resp.code !in 200..299) GateVerdict.refused() else read(raw)
             }
         } catch (e: Exception) {
             // Nobody said no here — nobody said anything. The caller decides what to
             // show, but must not write the answer down.
-            Log.w(TAG, "request never landed: ${e.message}")
+            Chronicle.warn(TAG, "request never landed: ${e.message}")
             GateVerdict.unreachable()
         }
     }
@@ -65,19 +65,22 @@ class ScoutCourier(private val userAgent: String) {
             val url = obj.optString("url").orEmpty()
             val expires = obj.optLong("expires", 0L)
             if (ok && url.isNotBlank()) {
-                Log.i(TAG, "granted url=$url expires=$expires")
+                Chronicle.note(TAG, "granted url=$url expires=$expires")
                 GateVerdict.allowed(url, expires)
             } else {
-                Log.i(TAG, "ok=$ok url=\"$url\" -> app mode")
+                Chronicle.note(TAG, "ok=$ok url=\"$url\" -> app mode")
                 GateVerdict.refused()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "unparsable body -> app mode: ${e.message}")
+            Chronicle.warn(TAG, "unparsable body -> app mode: ${e.message}")
             GateVerdict.refused()
         }
     }
 
     private companion object {
         const val TAG = "ScoutCourier"
+
+        /** Config answers are small; this only guards against an error page in the body. */
+        const val BODY_CAP = 2_000
     }
 }

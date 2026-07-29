@@ -696,8 +696,15 @@ class CanvasStage : AppCompatActivity() {
 
     /**
      * Native padding already keeps the page out of the cutout, so the page's own
-     * safe-area insets would double it. Only root containers and the CSS vars are
-     * reset — a universal selector would strip padding from real buttons.
+     * safe-area insets would double it. Two things do that, and nothing else:
+     * `viewport-fit=contain`, which is what makes `env(safe-area-inset-*)` resolve to
+     * zero, and the custom properties some sites copy those insets into.
+     *
+     * Horizontal padding and margins on the page's own containers are never touched.
+     * Sites lay their columns out with padding on `body` / `#app`, and zeroing that
+     * — as this used to — takes their gutters away with the inset, leaving content
+     * pressed against the edge of the screen. Only a top spacer is flattened, and
+     * only on a header class known to carry one.
      *
      * Nothing here runs while the keyboard is up: rewriting the viewport meta forces
      * a layout pass, and one landing mid-keyboard-animation is felt as a jolt.
@@ -717,9 +724,8 @@ class CanvasStage : AppCompatActivity() {
                   '--safe-top:0px!important;--safe-right:0px!important;' +
                   '--safe-bottom:0px!important;--safe-left:0px!important;' +
                 '}' +
-                'html,body,#__nuxt,#__layout,#app,#root,#__next{' +
-                  'padding-top:0!important;padding-left:0!important;' +
-                  'padding-right:0!important;margin-top:0!important;' +
+                '.gameview-mobile-header,.app-header,.js-safe-top{' +
+                  'padding-top:0!important;margin-top:0!important;' +
                 '}';
               function kbOpen(){
                 if (!window.visualViewport) return false;

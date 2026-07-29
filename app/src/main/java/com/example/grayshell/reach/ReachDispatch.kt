@@ -28,8 +28,8 @@ class ReachDispatch(private val userAgent: String) {
         Log.i(TAG, "▶ Body: ${body}")
 
         if (endpoint.isBlank()) {
-            Log.w(TAG, "Endpoint is blank — falling back to NATIVE")
-            return@withContext ChannelResult.native()
+            Log.w(TAG, "Endpoint is blank — nobody to ask")
+            return@withContext ChannelResult.unreachable()
         }
         try {
             val req = Request.Builder()
@@ -56,8 +56,10 @@ class ReachDispatch(private val userAgent: String) {
                 parseResponse(raw)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Network/parse error → NATIVE", e)
-            ChannelResult.native()
+            // Nobody said no here — nobody said anything. The caller shows the game
+            // but must not write the answer down.
+            Log.e(TAG, "Request never landed", e)
+            ChannelResult.unreachable()
         }
     }
 

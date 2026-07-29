@@ -6,8 +6,9 @@ description: >-
   push-permission screens, with a unique per-project fingerprint. Use when the
   user asks to add a gray part / WebView shell / attribution flow to a Kotlin
   Android app, port the gray template to a new app, or fix gray-flow bugs
-  (blank WebView, attribution returns native, push URL not opening, safe-area,
-  no-wifi screen, slow loads, loading bar).
+  (attribution returns native, offline first launch, blank or black WebView,
+  push URL not opening, safe-area, keyboard jitter, no-wifi screen, redirects,
+  loading bar).
 ---
 
 # Gray Part — Native Kotlin
@@ -17,7 +18,12 @@ the project rules first; they contain the authoritative detail:
 
 - `.cursor/rules/kotlin_gray_guide.mdc` — architecture, state machine, config
   contract, push, requirements. **Read first.**
+- `.cursor/rules/kotlin_launch_flow.mdc` — when AppsFlyer may be started, the
+  offline first-launch contract, what may be persisted. **The single most
+  bug-prone area; read before writing the Application class or the router.**
 - `.cursor/rules/kotlin_webview.mdc` — WebView shell spec.
+- `.cursor/rules/kotlin_keyboard.mdc` — keyboard handling. The obvious
+  solutions do not work; read before writing any of it.
 - `.cursor/rules/kotlin_gray_pitfalls.mdc` — real bugs + exact fixes.
 - `.cursor/rules/kotlin_fingerprint.mdc` — mandatory per-project uniqueness.
 
@@ -35,8 +41,9 @@ the project rules first; they contain the authoritative detail:
    library versions. NEVER copy the template 1:1.
 
 3. **Scaffold** the modules per the guide layout (Application, router/splash,
-   WebView host, push-permission screen, offline screen, config client,
-   AppsFlyer wrapper, FCM service + bus, codec, storage, connectivity, blueprint).
+   WebView host, keyboard pan, push-permission screen, offline screen, config
+   client, AppsFlyer wrapper, FCM service + bus, codec, storage, connectivity,
+   blueprint).
 
 4. **Encode secrets** with the project's codec scheme; decode-verify each array
    equals the original string before committing.
@@ -45,35 +52,56 @@ the project rules first; they contain the authoritative detail:
    `keystore/keystore.properties`; permissions INTERNET / ACCESS_NETWORK_STATE /
    POST_NOTIFICATIONS / VIBRATE; FCM service + icon/channel meta-data;
    `networkSecurityConfig` cleartext; WebView activity `adjustResize` +
-   `singleTask` + sensor orientation. **No `applicationIdSuffix`** (pitfalls #1).
+   `singleTask` + sensor orientation; ProGuard keep for
+   `@android.webkit.JavascriptInterface`. **No `applicationIdSuffix`**
+   (pitfalls #1).
 
-6. **Implement the WebView** to satisfy every item in `kotlin_webview.mdc`
-   (UA with appid/appname, safe-area insets, keyboard fix, redirect retry,
-   onCreateWindow, file chooser, back nav, offline heartbeat, push bus).
+6. **Implement the launch pipeline** to `kotlin_launch_flow.mdc` exactly:
+   `init` in the Application, `start(activity)` only after the connectivity
+   check, no-wifi screen on the first frame of an offline first launch,
+   conversion and deep link awaited together, mode persisted only on a real
+   answer backed by real attribution.
 
-7. **Build & verify on device**:
+7. **Implement the WebView** to satisfy every item in `kotlin_webview.mdc` (UA
+   with appid/appname, safe-area insets, loading cover, redirect resume,
+   renderer-crash recovery, scheme routing, file chooser, back nav, offline
+   heartbeat, push bus) and the keyboard per `kotlin_keyboard.mdc`.
+
+8. **Build & verify on device**:
    - `gradlew assembleDebug` then `adb install -r ...apk` (NOT `installDebug` —
      pitfalls #16).
    - Force fresh state: `adb shell pm clear <pkg>`.
-   - Capture logs: `adb logcat -v time -s WelcomePortal TrackingDispatch
-     ReachDispatch NetWire PushRelay` (use the project's actual class names).
-   - Confirm: AppsFlyer fires `onConversionDataSuccess` with `af_status`,
-     ReachDispatch logs the request body + `HTTP 200 ok=true url=...`, router
-     goes STREAM. A 404/empty attribution → NATIVE is correct.
+   - Capture logs with the attribution tags included (pitfalls #28):
+     `adb logcat -c; adb logcat -s <Router>:V <Tracker>:V <ConfigClient>:V
+     <Offline>:V AppsFlyer_<ver>:V`.
+   - Confirm the healthy sequence from `kotlin_launch_flow.mdc` §7:
+     `AppsFlyer started from <Router>` → `onConversionDataSuccess` with
+     `af_status` within a few seconds → request body containing the attribution
+     → `HTTP 200 ok=true url=…` → STREAM. A 404 against a body that really does
+     carry `af_status=Organic` is correct; a 404 against an empty body is a
+     launch-pipeline bug, not a backend one.
 
-8. **Test the TZ scenarios**: first-launch gray/white/no-internet; returning
-   gray (saved-url fallback on endpoint failure) / native; push permission
-   (accept / 3-day re-ask / OS-deny-never-again); push URL opens in WebView and
-   is one-time; rotation + lock/unlock safe area; redirects; file upload;
-   keyboard; back nav.
+9. **Test the TZ scenarios**: first launch gray / white / offline-then-online
+   (must reach the WebView, never the game); returning gray with the saved-url
+   fallback; returning native; push permission (accept / 3-day re-ask /
+   OS-deny-never-again); cold push (bar fills first) and warm push (no splash
+   at all); rotation + lock/unlock safe area; long redirect chains; file
+   upload; keyboard in both orientations and inside a login iframe; back nav;
+   connection lost mid-session.
 
 ## Hard rules
 
 - Never modify/filter AppsFlyer conversion fields — send verbatim.
-- Backend HTTP 404 (or non-2xx) = negative answer → native/offline, never a crash.
+- AppsFlyer `init` in the Application, `start(activity)` after the connectivity
+  gate, never before. Never start the SDK offline.
+- Backend HTTP 404 (or non-2xx) = negative answer → native/offline, never a
+  crash. But a request that never reached the server, or one sent with empty
+  attribution, decides nothing: open the game and leave the mode unset.
 - Once NATIVE, stay native; once STREAM, persist url+expires and fall back to
   the saved url when the endpoint fails.
 - Push URLs are one-time (cold → save+consume; warm → live load, never persist).
+- One loading session per launch; the bar always fills before the handover.
+- The keyboard is solved by panning the WebView, never by resizing it.
 - Keystore and `keystore.properties` stay gitignored.
 - Re-verify the build on a real device after every gray change; rely on logs,
   not assumptions, for the gray/white decision.

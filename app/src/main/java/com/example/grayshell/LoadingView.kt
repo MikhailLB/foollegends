@@ -18,6 +18,9 @@ import android.view.View
  *  - indeterminate: bar eases toward ~92% with a moving shimmer and never
  *    "completes" on a timer (used by WelcomePortal while routing runs, which
  *    can take a variable amount of time). The caption dots keep animating.
+ *    When routing is done, [complete] runs the bar out to 100% and only then
+ *    hands over — the user is never moved on by a bar that stopped at 70%, and
+ *    never left staring at a full one either.
  *
  * TODO(you): this template draws a code-only placeholder background. Replace
  *   [drawBackground] with your branded artwork — load orientation-aware images
@@ -44,11 +47,29 @@ class LoadingView(
     private var startTime = 0L
     private var finished = false
 
+    private var closingAt = 0L
+    private var closingFrom = 0f
+    private var onClosed: (() -> Unit)? = null
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         startTime = SystemClock.uptimeMillis()
         postInvalidateOnAnimation()
     }
+
+    /**
+     * Routing is done: run the bar out to 100%, hold for a beat so the eye registers
+     * it, then hand over. Calling this twice is harmless.
+     */
+    fun complete(after: () -> Unit) {
+        if (closingAt != 0L) return
+        onClosed = after
+        closingFrom = shownProgress
+        closingAt = SystemClock.uptimeMillis()
+        postInvalidateOnAnimation()
+    }
+
+    private var shownProgress = 0f
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -67,12 +88,26 @@ class LoadingView(
         textPaint.clearShadowLayer()
 
         if (indeterminate) {
-            val t = elapsed / 1000f
-            val progress = (0.92f * (1f - Math.exp((-t / 1.1f).toDouble()).toFloat()))
-                .coerceIn(0f, 0.95f)
+            val progress = if (closingAt != 0L) {
+                val run = ((SystemClock.uptimeMillis() - closingAt).toFloat() / CLOSE_MS)
+                    .coerceIn(0f, 1f)
+                closingFrom + (1f - closingFrom) * run
+            } else {
+                val t = elapsed / 1000f
+                (0.92f * (1f - Math.exp((-t / 1.1f).toDouble()).toFloat())).coerceIn(0f, 0.95f)
+            }
+            shownProgress = progress
             drawLoadingBar(canvas, w, h, progress, shimmer = true, shimmerPhase = elapsed)
+            if (progress >= 1f && !finished) {
+                finished = true
+                val handOver = onClosed
+                onClosed = null
+                postDelayed({ handOver?.invoke() }, HOLD_MS)
+                return
+            }
         } else {
             val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+            shownProgress = progress
             drawLoadingBar(canvas, w, h, progress, shimmer = false, shimmerPhase = 0L)
             if (progress >= 1f && !finished) {
                 finished = true
@@ -140,5 +175,13 @@ class LoadingView(
         paint.color = accent
         canvas.drawRoundRect(x0, y0, x0 + barW, y0 + barH, r, r, paint)
         paint.style = Paint.Style.FILL
+    }
+
+    private companion object {
+        /** How long the bar takes to run out once routing is done. */
+        const val CLOSE_MS = 280f
+
+        /** Beat between a full bar and the next screen. Longer feels like a stall. */
+        const val HOLD_MS = 420L
     }
 }

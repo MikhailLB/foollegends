@@ -90,6 +90,10 @@ class OfflinePortal : AppCompatActivity() {
                         .putExtra(StreamPortal.EXTRA_STREAM_URL, returnUrl)
                         .setFlags(FLAG_ACTIVITY_CLEAR_TOP)
                 } else {
+                    // With no page to go back to, this is a first launch that began
+                    // offline: the router runs its decision from the top, which is
+                    // the first time AppsFlyer is asked anything. Patching state
+                    // here instead would settle the install as organic.
                     Intent(this@OfflinePortal, WelcomePortal::class.java)
                         .setFlags(FLAG_ACTIVITY_CLEAR_TASK or FLAG_ACTIVITY_NEW_TASK)
                 }

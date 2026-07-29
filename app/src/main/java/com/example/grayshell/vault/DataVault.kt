@@ -101,6 +101,20 @@ class DataVault(ctx: Context) {
         set(v) = if (v == null) secure.edit().remove(KEY_FCM).apply()
                  else secure.edit().putString(KEY_FCM, v).apply()
 
+    // ---------------------------------------------------------------- keyboard height
+
+    /**
+     * The height the keyboard last came to rest at, per orientation. Mid-animation the
+     * system over-reports it, so KeyboardPan needs a figure it can trust from the
+     * first frame of the very first opening — see KeyboardPan's own notes.
+     */
+    fun keyboardRest(portrait: Boolean): Int =
+        plain.getInt(if (portrait) KEY_KB_TALL else KEY_KB_WIDE, 0)
+
+    fun rememberKeyboardRest(portrait: Boolean, height: Int) {
+        plain.edit().putInt(if (portrait) KEY_KB_TALL else KEY_KB_WIDE, height).apply()
+    }
+
     // ----------------------------------------------------------------
 
     companion object {
@@ -116,5 +130,7 @@ class DataVault(ctx: Context) {
         private const val KEY_NOTIF_GRANTED = "nf_ok"
         private const val KEY_NOTIF_OS_DENIED = "nf_os_no"
         private const val KEY_FCM          = "fcm_t"
+        private const val KEY_KB_TALL      = "kb_t"
+        private const val KEY_KB_WIDE      = "kb_w"
     }
 }

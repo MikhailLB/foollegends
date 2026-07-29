@@ -53,14 +53,15 @@ app/src/main/java/<pkg>/
 │   └── WelcomePortal.kt     LAUNCHER: gray/white routing + branded splash
 ├── portal/
 │   ├── StreamPortal.kt      Full-screen WebView shell (gray)
+│   ├── KeyboardPan.kt       Slides the WebView clear of the keyboard
 │   ├── AlertPortal.kt       Push-permission promo (Accept / Skip)
 │   └── OfflinePortal.kt     No-internet screen + Retry
 ├── reach/
 │   ├── ReachDispatch.kt     POST to config endpoint (OkHttp)
-│   └── TrackingDispatch.kt  AppsFlyer SDK + attribution + GCD organic retry
+│   └── TrackingDispatch.kt  AppsFlyer: prime/ignite, deep link, GCD, re-ask
 ├── signal/
 │   ├── PushRelay.kt         FirebaseMessagingService
-│   └── PushBus.kt           process-wide warm-URL hand-off
+│   └── PushBus.kt           process-wide warm-URL hand-off (callback + queue)
 ├── vault/
 │   ├── CipherVault.kt       XOR deobfuscator (unique seed per project)
 │   └── DataVault.kt         SharedPreferences + EncryptedSharedPreferences
@@ -88,29 +89,43 @@ keystore/keystore.properties         signing creds (gitignored)
 ```
 runChannel == UNDECIDED (first launch)
   ├─ cold push URL present? → STREAM with that URL (highest priority)
-  ├─ no internet → native game (organic by definition)
+  ├─ no internet → OfflinePortal ON THE FIRST FRAME. Nothing started, nothing
+  │    persisted; the link returning restarts this whole router. NEVER the game
+  │    — an install that came through a link must still reach the WebView.
   ├─ has internet:
-  │    ├─ AppsFlyer attribution (await up to 30s)
-  │    ├─ build POST body (attribution + device + push + firebase)
+  │    ├─ start AppsFlyer NOW, not earlier (see kotlin_launch_flow.mdc §1–2)
+  │    ├─ await conversion (30s) and deferred deep link (5s) in parallel
+  │    ├─ build POST body (attribution + deep link + device + push + firebase)
   │    ├─ ReachDispatch.fetchChannel(body)
   │    ├─ ok+url → save url+expires, runChannel=STREAM → AlertPortal?→StreamPortal
-  │    └─ else   → runChannel=NATIVE → game
+  │    └─ else   → game; persist NATIVE only if the endpoint answered AND the
+  │               attribution was non-empty, otherwise leave UNDECIDED
 
 runChannel == STREAM (returning, was WebView)
   ├─ cold push URL → StreamPortal (highest priority, one-time)
   ├─ no internet → OfflinePortal (with savedUrl if any)
-  ├─ AppsFlyer attribution (await up to 10s) → fetchChannel
+  ├─ start AppsFlyer, attribution (10s) → fetchChannel
   │    ├─ ok+url → StreamPortal(new url) + persist
   │    ├─ fail + savedUrl(not expired) → StreamPortal(savedUrl)
   │    └─ fail + no saved → OfflinePortal
 
 runChannel == NATIVE (returning, was game)
-  └─ native game, ALWAYS, no network needed
+  └─ native game, ALWAYS, no network needed, AppsFlyer not started
 ```
 
 Key invariant: **once the backend says native, the user stays native forever**
 (don't re-query, don't show WebView on later visits). The backend owns the
 conversion decision, not the client.
+
+The counter-invariant, equally hard: **a "no" is only recorded when a server
+actually said it, to a request that actually carried attribution.** A transport
+failure or an empty conversion map is not a verdict — open the game for that
+run and leave the channel UNDECIDED. Full reasoning and code in
+`kotlin_launch_flow.mdc` §5.
+
+Everything about *when* each step may run — the two-stroke AppsFlyer start, the
+offline first launch, the timeouts, and the log lines that prove it works —
+lives in **`kotlin_launch_flow.mdc`**. Read it before writing the router.
 
 ---
 
@@ -148,17 +163,24 @@ If attribution is empty/Organic, expect 404 → native. This is correct.
 
 ## AppsFlyer attribution (the part most likely to be wrong)
 
-- The conversion listener MUST be passed to `init(key, listener, ctx)` and then
-  `start(ctx)` — NOT registered after start. Bridge the async callback to a
-  coroutine with `CompletableDeferred`.
+**`kotlin_launch_flow.mdc` is the authority here.** The short version:
+
+- `subscribeForDeepLink` + `init(key, listener, appContext)` in
+  `Application.onCreate`; the listener goes INTO `init`, never registered after
+  `start`. Bridge the callback to a coroutine with `CompletableDeferred`.
+- `start(activity)` from the router, **after** connectivity is confirmed, and
+  **with the Activity** — an application context passed from inside an activity
+  does not trigger the SDK at all.
+- Never let the SDK start offline: the failed conversion it caches is final for
+  the session and turns a paid install into an organic one.
+- Await the conversion and the deferred deep link in parallel.
 - `af_status == "Organic"` may be a false positive on first run. Wait
   `~5s`, then call the **GCD API** and prefer its result:
   `GET <gcdBase><bundleId>?device_id=<appsFlyerUID>` with
-  `Authorization: Bearer <devKey>`.
-- Timeouts: first launch 30s, returning online 10s, deep-link 5s.
+  `Authorization: Bearer <devKey>`. The same call is the fallback when the SDK
+  reports nothing at all.
+- Timeouts: first launch 30s, returning online 10s, deep-link 5s, re-ask 8s.
 - NEVER modify the conversion field set.
-
-See `kotlin_gray_pitfalls.mdc` for the exact listener/CompletableDeferred trap.
 
 ---
 
@@ -194,7 +216,8 @@ See `kotlin_gray_pitfalls.mdc` for the exact listener/CompletableDeferred trap.
 | WebView | Safe Area in any orientation + after lock/unlock |
 | Rotation | allow system rotation / sensor auto-rotate |
 | Back | WebView goes back; back on first page does NOT close app |
-| ERR_TOO_MANY_REDIRECTS | keep loading last URL (retry up to 3) |
+| ERR_TOO_MANY_REDIRECTS | keep loading the last main-frame URL, retry up to 6 |
+| Redirect hops | invisible to the user — a cover, never a second splash |
 | JS / cookies / sessions | enabled |
 | inline autoplay video | `mediaPlaybackRequiresUserGesture = false` |
 | file upload | WebChromeClient file chooser, no extra perms |
@@ -213,6 +236,33 @@ See `kotlin_gray_pitfalls.mdc` for the exact listener/CompletableDeferred trap.
 - Build: `gradlew assembleRelease bundleRelease`. Ship the AAB to Play.
 - Install on a locked device with `adb install -r` (not `gradlew installDebug`).
 
-For the full list of bugs hit while building this and their fixes, read
-`kotlin_gray_pitfalls.mdc`. For WebView specifics read `kotlin_webview.mdc`.
-For per-project uniqueness read `kotlin_fingerprint.mdc`.
+---
+
+## The loading screen is one session per launch
+
+The bar belongs to the launch, not to any single activity, and the user sees it
+exactly once — at startup. Everything else that loads (redirects, a push URL, a
+page after the permission screen) hides behind a cover, never behind a second
+splash. See `kotlin_webview.mdc` §"Loading session and the cover".
+
+Rules that came straight from client feedback:
+
+- The bar must reach 100% before the launch hands over to anything — game,
+  WebView or push URL — and the handover follows within ~0.5 s. Not before, not
+  seconds after.
+- Accepting the notification permission must NOT bring the splash back. The
+  permission screen stays up until the page behind it is ready.
+- Returning from a warm push must not show a splash at all: the user should see
+  the page they left, then the pushed URL.
+
+---
+
+## Companion rules
+
+| File | Read it when |
+|---|---|
+| `kotlin_launch_flow.mdc` | Touching the Application class, the router, or attribution. **The most bug-prone area — read first.** |
+| `kotlin_webview.mdc` | Implementing or fixing the WebView shell. |
+| `kotlin_keyboard.mdc` | The keyboard covers an input, or content jumps when it opens. |
+| `kotlin_gray_pitfalls.mdc` | Anything is broken. Every entry is a bug that really happened. |
+| `kotlin_fingerprint.mdc` | Always, before writing the first file of a new project. |

@@ -119,6 +119,11 @@ class AlertPortal : AppCompatActivity() {
         proceed()
     }
 
+    /**
+     * Straight to the shell, and deliberately not back through the launcher: the
+     * splash has had its one showing for this launch, and bringing it back after the
+     * permission dialog reads as the app restarting.
+     */
     private fun proceed() {
         val next = Intent(this, StreamPortal::class.java).apply {
             pendingUrl?.let { putExtra(StreamPortal.EXTRA_STREAM_URL, it) }

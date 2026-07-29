@@ -37,11 +37,11 @@ class PushRelay : FirebaseMessagingService() {
         val url     = data["url"]     ?: data["link"]   ?: ""
         val imgUrl  = data["image"]   ?: notif?.imageUrl?.toString() ?: ""
 
-        // App in foreground with WebView visible → hand the URL off live and
-        // skip the notification (warm-tap UX). Per spec: do NOT save warm URLs.
-        val handler = com.example.grayshell.signal.PushBus.onWarmUrl
-        if (handler != null && url.isNotBlank()) {
-            try { handler.invoke(url); return } catch (_: Exception) { /* fall through */ }
+        // WebView on screen → load it there and post nothing. Per spec: warm URLs
+        // are never saved.
+        if (url.isNotBlank() && PushBus.onWarmUrl != null) {
+            val delivered = runCatching { PushBus.handOver(url) }.getOrDefault(false)
+            if (delivered) return
         }
 
         // Cold-start case: save the URL so WelcomePortal can pick it up next launch.
@@ -55,12 +55,12 @@ class PushRelay : FirebaseMessagingService() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(nm)
 
-        // Route through WelcomePortal so it can re-check routing if the user
-        // somehow ended up in NATIVE mode again. WelcomePortal forwards the URL
-        // to StreamPortal via vault.coldPushUrl.
+        // Route through WelcomePortal so it can re-check routing if the user somehow
+        // ended up in NATIVE mode again. Deliberately no CLEAR_TOP: it would tear
+        // down a live StreamPortal underneath, which is exactly the shell the warm
+        // hand-off needs still standing.
         val tap = Intent(this, WelcomePortal::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (url.isNotBlank()) putExtra(WelcomePortal.EXTRA_PUSH_URL, url)
             putExtra(WelcomePortal.EXTRA_FROM_PUSH, true)

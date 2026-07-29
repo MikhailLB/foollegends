@@ -122,7 +122,9 @@ Or just avoid it (log unconditionally with `Log.i`).
 **Cause:** passing `null` to `init()` then calling
 `registerConversionListener` after `start()`.
 
-**Fix:** pass the listener INTO `init`, then `start`. Bridge to coroutine:
+**Fix:** pass the listener INTO `init`. Where `init` and `start` each belong is
+a separate and much nastier question — see #19 and `kotlin_launch_flow.mdc`
+before copying the snippet below, which shows only the listener bridge:
 
 ```kotlin
 private val attribution = CompletableDeferred<Map<String, Any?>>()
@@ -230,12 +232,14 @@ a capability-filtered `registerNetworkCallback` may not emit `onLost`.
 to an external browser. Also `shouldOverrideUrlLoading` sent non-`http` schemes
 externally too eagerly.
 
-**Fix:**
-- `settings.setSupportMultipleWindows(true)` + override `onCreateWindow` to load
-  in the SAME WebView (`transport.webView = view; resultMsg.sendToTarget()`).
-- In `shouldOverrideUrlLoading` only externalize known app schemes
-  (`tel: mailto: sms: market: intent: whatsapp:`); everything else stays in
-  the WebView.
+**Fix:** leave `setSupportMultipleWindows(false)` (the default). The WebView
+then opens `target="_blank"` in place and no external tab is involved.
+
+**Do NOT** enable multiple windows and hand `onCreateWindow` the same WebView
+as the transport — see #21, it crashes.
+
+For scheme routing, whitelist the web schemes and externalize everything else
+(#22), not the other way round.
 
 ---
 
@@ -294,7 +298,183 @@ Don't rely on plain white text over a bright background.
 
 ---
 
-## 18. Misc
+## 19. AppsFlyer started offline, or started from the wrong place (CRITICAL)
+
+Three distinct bugs with one symptom — **a OneLink install lands in the native
+game** — and all three cost a full test cycle each. Full treatment in
+`kotlin_launch_flow.mdc`; the short forms:
+
+**19a. Started with no connection.** `start()` runs in `Application.onCreate`,
+the device is offline, `onConversionDataFail` fires in milliseconds and the
+`CompletableDeferred` completes with an empty map. When the user turns Wi-Fi on
+and the router asks again, it gets that cached empty map back in 2 ms, sends a
+body with no attribution, and the backend correctly answers 404.
+
+*Tell:* `conversion={}` logged a couple of milliseconds after the decision
+started.
+*Fix:* connectivity gate before `start`, always. Plus a re-ask and a direct GCD
+call as safety nets.
+
+**19b. `init` moved out of the Application.** Fixing 19a by moving the whole
+AppsFlyer setup into the router breaks it differently: the SDK learns the app
+is in the foreground from `ActivityLifecycleCallbacks` registered during
+`init`, so registering them while an activity is already resumed misses the
+event. The launch is queued until the *next* activity appears — the native
+game, ~32 seconds later.
+
+*Tell:* a 30-second gap, then `onBecameForeground` / `Sending first launch for
+this session!`, then the correct conversion, far too late. AppsFlyer's own
+payload says `"first_launch":{"init_to_fg":32239}`.
+*Fix:* `init` in `Application.onCreate` (sends nothing), `start` in the router.
+
+**19c. `start(applicationContext)` called from an Activity.** Same 30-second
+hang. AppsFlyer's guide: *"Failing to pass the activity context will not
+trigger the SDK, thus losing attribution data and in-app events."*
+
+*Fix:* `AppsFlyerLib.getInstance().start(activity)`.
+
+---
+
+## 20. First launch offline sends the user to the game — permanently
+
+**Symptom:** OneLink install with the radio off. The app shows the game, and
+after Wi-Fi returns it keeps showing the game on every future launch.
+
+**Cause:** the offline branch of the first decision routed to the game, and the
+negative verdict was persisted as the mode. The mode is by contract permanent,
+so the paid user is locked out for the life of the install.
+
+**Fix:** offline on an undecided first launch → the no-wifi screen **on the
+first frame** (instant `activeNetwork` check before `setContentView`), nothing
+started, nothing persisted; the offline screen relaunches the router when the
+link returns. And persist `NATIVE` only when the endpoint actually answered AND
+the request carried attribution (`kotlin_launch_flow.mdc` §4–5).
+
+---
+
+## 21. `onCreateWindow` with the same WebView (CRASH)
+
+**Symptom:** `IllegalArgumentException: Parent WebView cannot host its own
+popup window`. Reproduced on the third page of a test site's "next page" chain.
+
+**Cause:** `setSupportMultipleWindows(true)` plus
+`transport.webView = view` — the parent WebView cannot be its own popup host.
+
+**Fix:** `setSupportMultipleWindows(false)`; `window.open` then loads in place.
+Only if popups are truly required, create a separate throwaway WebView for the
+transport and forward its first URL to the main view.
+
+---
+
+## 22. ERR_UNKNOWN_URL_SCHEME on payment / wallet links
+
+**Symptom:** *"Не удалось открыть веб-страницу … paytmmp://pay …
+ERR_UNKNOWN_URL_SCHEME"*.
+
+**Cause:** `shouldOverrideUrlLoading` externalized only a hardcoded list of
+schemes and let everything unknown fall through to the WebView.
+
+**Fix:** invert it — keep `http/https/about/data/blob/file/javascript` in the
+WebView and hand every other scheme to the system with `ACTION_VIEW`
+(`intent://` parsed via `Intent.parseUri`, with the `browser_fallback_url`
+honoured). Treat `ERROR_UNSUPPORTED_SCHEME` in `onReceivedError` as harmless:
+the URL already went to the system, so leave the page where it was.
+
+---
+
+## 23. Black screen between redirects
+
+**Symptom:** tapping a link that redirects: the page zooms out, goes black, and
+only then shows the destination.
+
+**Cause:** a "freeze-frame" built with `view.draw(canvas)` to hide the hops. A
+hardware-accelerated WebView draws **black** into a software canvas.
+
+**Fix:** never snapshot the view. Cover the live page with a scrim + spinner
+instead, and drop it a beat after the load finishes so consecutive hops don't
+make it blink (`kotlin_webview.mdc`).
+
+---
+
+## 24. Redirect retry budget never runs down
+
+**Symptom:** `ERR_TOO_MANY_REDIRECTS` on a chain longer than 20 hops; the retry
+"works" but the user still ends up on the native error page.
+
+**Cause:** a failed load still reaches `onPageFinished` with the error page
+committed. That handler reset the retry counter and recorded the error URL as
+settled, and it also dropped the cover while a reload was queued.
+
+**Fix:** a `loadFailed` flag set in `onReceivedError` and cleared in
+`onPageStarted` (skip the whole `onPageFinished` body when set), and a
+`retryPending` flag that keeps the cover up across the reload. Resume at the
+deepest hop seen, not at the original URL, and allow ~6 attempts with a ~60 ms
+pause.
+
+---
+
+## 25. The keyboard fix that is in every tutorial does not work
+
+**Symptom:** content jumps higher than needed when the keyboard opens and drops
+back a frame later; sometimes fine, sometimes not — "дёргается".
+
+**Cause:** `adjustResize` (or IME padding) plus a JS `scrollIntoView` means the
+engine and the injection both scroll the same page, and their corrections add
+up.
+
+**Fix:** the pan approach in `kotlin_keyboard.mdc` — strip IME insets from the
+WebView, slide the view with `translationY`, clamp to the *settled* keyboard
+height (the system over-reports by 45–80 px mid-animation) and remember that
+height per orientation across runs.
+
+---
+
+## 26. The loading screen appears twice, or the bar never fills
+
+**Symptom:** the splash is shown on launch, then again before the WebView; the
+bar jumps to the next screen at 60%; after granting the notification permission
+the splash comes back.
+
+**Cause:** each activity ran its own loading session, and navigation happened
+on its own schedule rather than on the bar's.
+
+**Fix:** one session per launch, shared across activities (a process-wide
+clock), and a single `complete { … }` gate: the bar runs to 100%, then the
+handover happens ~0.5 s later. The permission screen holds until the page
+behind it is ready; a warm push draws nothing at all.
+
+---
+
+## 27. JavascriptInterface stripped in release
+
+**Symptom:** everything that talks to the page (keyboard pan, safe-area probe)
+works in debug and silently does nothing in a minified build.
+
+**Fix:**
+```
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+```
+
+---
+
+## 28. Logcat filter that hides the answer
+
+**Symptom:** hours spent on "attribution doesn't work" with no evidence either
+way.
+
+**Cause:** the log filter listed the router and the WebView but not the
+attribution wrapper, the config client or `AppsFlyer_<version>`.
+
+**Fix:** always include them. The AppsFlyer tag carries the SDK's own
+telemetry — `init_to_fg`, `Sending first launch`, the GCD URL — which is what
+identified #19b:
+```powershell
+adb logcat -c; adb logcat -s <Router>:V <Tracker>:V <ConfigClient>:V <Offline>:V AppsFlyer_6.17.6:V
+```
+
+---
+
+## 29. Misc
 
 - `Locale` import: use `java.util.Locale`, not `android.os.Locale`.
 - `intArrayOf<Int>()` is invalid — write `intArrayOf()`.

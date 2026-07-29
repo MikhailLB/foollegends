@@ -28,9 +28,14 @@ class AppEntry : Application() {
             // Firebase not configured yet — gray flow will still attempt config fetch.
         }
 
-        // AppsFlyer — dev key encoded in AppBlueprint (provided separately).
+        // AppsFlyer — wired up here and nowhere else, because the SDK learns the
+        // app is in the foreground from the activity callbacks it registers now,
+        // and registering them once an activity is already on screen means it
+        // never notices. Not a byte is sent until WelcomePortal calls ignite(),
+        // which it does only after seeing a connection. See
+        // .cursor/rules/kotlin_launch_flow.mdc — this split is not optional.
         trackingDispatch = TrackingDispatch(this)
-        trackingDispatch.init()
+        trackingDispatch.prime()
     }
 
     private fun isDebugBuild(): Boolean {

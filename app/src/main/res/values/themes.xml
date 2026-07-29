@@ -12,6 +12,13 @@
         <item name="android:windowContentOverlay">@null</item>
     </style>
 
+    <!--
+        Launcher activity theme. On API 31+ (see values-v31/styles.xml) this also
+        drives the Android 12+ splash screen, so its icon matches the home-screen
+        launcher icon exactly (both point at @mipmap/ic_launcher_layer).
+    -->
+    <style name="Theme.FoolLegends.Launch" parent="Theme.FoolLegends.Fullscreen" />
+
     <style name="Theme.FoolLegends.Web" parent="Theme.AppCompat.DayNight.DarkActionBar">
         <item name="colorPrimary">@color/bg_red</item>
         <item name="colorPrimaryDark">@color/bg_dark</item>

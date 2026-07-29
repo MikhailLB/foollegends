@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        Android 12+ splash screen. windowSplashScreenAnimatedIcon must point at
+        an AdaptiveIconDrawable (a flat PNG silently falls back to the launcher
+        icon and looks clipped), so it reuses @drawable/ic_splash_logo, which is
+        wired to the exact same background/foreground as the launcher icon.
+    -->
+    <style name="Theme.FoolLegends.Launch" parent="Theme.FoolLegends.Fullscreen">
+        <item name="android:windowSplashScreenBackground">@color/bg_dark</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+    </style>
+
+</resources>

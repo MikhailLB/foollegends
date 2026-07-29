@@ -54,7 +54,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:screenOrientation="sensor"
-            android:theme="@style/Theme.FoolLegends.Fullscreen">
+            android:theme="@style/Theme.FoolLegends.Launch">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

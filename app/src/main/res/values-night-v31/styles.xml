@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Dark-mode variant: same splash art/colors, kept as its own file so a
+         future theme split (light/dark) doesn't silently lose the splash. -->
+    <style name="Theme.FoolLegends.Launch" parent="Theme.FoolLegends.Fullscreen">
+        <item name="android:windowSplashScreenBackground">@color/bg_dark</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+    </style>
+
+</resources>

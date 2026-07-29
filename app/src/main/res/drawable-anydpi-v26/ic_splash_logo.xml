@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ splash icon. Deliberately reuses the exact same layers as
+    mipmap-anydpi-v26/ic_launcher.xml so the splash icon is pixel-identical to
+    the home-screen launcher icon under any mask (circle, squircle, teardrop).
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_layer" />
+    <foreground android:drawable="@drawable/ic_launcher_veil" />
+</adaptive-icon>

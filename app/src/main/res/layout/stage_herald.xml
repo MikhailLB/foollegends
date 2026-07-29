@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gray_stage">
+
+    <ScrollView
+        android:id="@+id/content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:minHeight="200dp"
+            android:orientation="vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="24dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/panel_card"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingHorizontal="24dp"
+                android:paddingVertical="26dp">
+
+                <TextView
+                    android:id="@+id/title"
+                    style="@style/GrayTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:maxWidth="330dp"
+                    android:text="@string/herald_title" />
+
+                <TextView
+                    android:id="@+id/subtitle"
+                    style="@style/GraySubtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center"
+                    android:maxWidth="330dp"
+                    android:text="@string/herald_subtitle" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="22dp"
+                    android:background="@drawable/panel_divider" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="22dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/btnPrimary"
+                        style="@style/GrayButton"
+                        android:layout_width="146dp"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/btn_gold"
+                        android:paddingVertical="14dp"
+                        android:text="@string/herald_allow"
+                        android:textColor="#FF1A0A00" />
+
+                    <Space
+                        android:layout_width="14dp"
+                        android:layout_height="1dp" />
+
+                    <TextView
+                        android:id="@+id/btnSecondary"
+                        style="@style/GrayButton"
+                        android:layout_width="146dp"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/btn_ghost"
+                        android:paddingVertical="14dp"
+                        android:shadowColor="#FF000000"
+                        android:shadowDy="1"
+                        android:shadowRadius="5"
+                        android:text="@string/herald_skip"
+                        android:textColor="@color/gold" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

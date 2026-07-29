@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:centerColor="#FF3A0A0C"
+                android:centerY="0.42"
+                android:endColor="#FF0B0203"
+                android:startColor="#FF5E0F14"
+                android:type="linear" />
+        </shape>
+    </item>
+    <!-- Warm glow behind the panel so the flat gradient doesn't read as dead space. -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:centerColor="#3D7A1A12"
+                android:centerX="0.5"
+                android:centerY="0.45"
+                android:endColor="#00000000"
+                android:gradientRadius="72%p"
+                android:startColor="#597A2A14"
+                android:type="radial" />
+        </shape>
+    </item>
+</layer-list>

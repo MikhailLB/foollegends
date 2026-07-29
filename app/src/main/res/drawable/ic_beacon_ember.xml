@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome status-bar glyph: a single ember flame. Never the launcher icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2C12,2 13.1,4.6 13.1,6.4C13.1,8.1 12,9.1 12,10.6C12,11.6 12.7,12.4 13.7,12.4C14.9,12.4 15.7,11.4 15.7,10C17.4,11.5 18.4,13.6 18.4,15.6C18.4,19.1 15.5,22 12,22C8.5,22 5.6,19.1 5.6,15.6C5.6,12.2 7.7,9.4 9.6,7.1C11,5.4 12,4 12,2Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillAlpha="0.45"
+        android:pathData="M12,13.4C12,13.4 14.5,15.3 14.5,17.5C14.5,19 13.4,20.2 12,20.2C10.6,20.2 9.5,19 9.5,17.5C9.5,15.3 12,13.4 12,13.4Z" />
+</vector>

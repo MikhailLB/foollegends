@@ -20,8 +20,8 @@ android {
         applicationId = "com.legendfool.foollegends"
         minSdk = 30
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.1"
+        versionCode = 11
+        versionName = "1.0.5"
     }
 
     signingConfigs {

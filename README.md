@@ -40,9 +40,9 @@ app/src/main/java/com/legendfool/foollegends/
   GameView.kt          — вся отрисовка: кнопки, джокер, подсветка, тряска, таймер
   GameEngine.kt        — чистая логика: цвета, генерация уровней, правила лжи
   Fullscreen.kt        — иммерсивный полноэкранный режим
-app/src/main/res/drawable-nodpi/  — joker_*.png, loading_portrait/landscape.png
+app/src/main/res/drawable-nodpi/  — joker_*.png, loading_portrait/landscape.jpg
 web/                  — privacy-policy.html, support.html (для хостинга)
-tools/make_icons.ps1  — генерация иконок из лица Джокера
+tools/make_assets.ps1 — лоадинг-арт и иконки (адаптивные + legacy) из assets/
 ```
 
 ## Сборка

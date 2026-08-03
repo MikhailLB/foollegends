@@ -39,7 +39,7 @@ class AlertPortal : AppCompatActivity() {
         } else {
             val denied = !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
             if (denied) vault.notifOsDenied = true
-            else vault.skipNotifFor3Days()
+            else vault.snoozeNotifPrompt()
         }
         proceed()
     }
@@ -96,7 +96,7 @@ class AlertPortal : AppCompatActivity() {
         root.addView(btnRow)
 
         setContentView(root)
-        hideSystemUi()
+        com.example.grayshell.Fullscreen.apply(this)
     }
 
     private fun onAccept() {
@@ -115,7 +115,7 @@ class AlertPortal : AppCompatActivity() {
     }
 
     private fun onSkip() {
-        vault.skipNotifFor3Days()
+        vault.snoozeNotifPrompt()
         proceed()
     }
 
@@ -131,7 +131,6 @@ class AlertPortal : AppCompatActivity() {
         }
         startActivity(next)
         finish()
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     private fun buildButton(label: String, accent: Boolean): TextView {
@@ -166,19 +165,6 @@ class AlertPortal : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         recreate()
-    }
-
-    private fun hideSystemUi() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                )
-        }
     }
 
     companion object {

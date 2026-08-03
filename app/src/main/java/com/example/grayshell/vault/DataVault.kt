@@ -4,49 +4,84 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.grayshell.BuildConfig
+import com.example.grayshell.core.Trace
 
 /**
- * Persistent data store. Sensitive values (URLs) use EncryptedSharedPreferences;
- * non-sensitive flags use regular SharedPreferences.
+ * Persistent state for the gray flow. Two-tier storage:
+ *   * plain SharedPreferences for flags and timestamps (non-sensitive), and
+ *   * EncryptedSharedPreferences for URLs (destination, cold push).
+ *
+ * The file names and every key string are per-project — the build derives them
+ * from `gray.seed` and writes them into BuildConfig, so no two apps in the
+ * portfolio share so much as a preference filename. `rebrand.py` can rename
+ * the file and its class name without touching semantics.
+ *
+ * If the encrypted store cannot be created (the crypto provider is missing or
+ * the keystore is inaccessible), the *class* refuses to expose URL setters at
+ * all — an in-memory holder is used instead, so a URL from an earlier launch
+ * is never accidentally written to plaintext prefs on this device.
  */
 class DataVault(ctx: Context) {
 
-    private val plain: SharedPreferences =
-        ctx.getSharedPreferences("fl_state", Context.MODE_PRIVATE)
+    /** Values persisted in [SharedPreferences]. */
+    enum class RunChannel { UNDECIDED, STREAM, NATIVE }
 
-    private val secure: SharedPreferences by lazy {
-        try {
-            val master = MasterKey.Builder(ctx)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                ctx,
-                "fl_enc",
-                master,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (e: Exception) {
-            plain
+    private val plain: SharedPreferences =
+        ctx.getSharedPreferences(BuildConfig.PREFS_PLAIN, Context.MODE_PRIVATE)
+
+    private val secureImpl: SharedPreferences? = try {
+        val master = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            ctx,
+            BuildConfig.PREFS_SECURE,
+            master,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (e: Exception) {
+        Trace.w(TAG, "EncryptedSharedPreferences unavailable, keeping URLs in-memory", e)
+        null
+    }
+
+    /** In-memory backup used when the encrypted store failed to open. */
+    private val fallback = HashMap<String, String?>()
+
+    private fun readSecure(key: String): String? =
+        secureImpl?.getString(key, null) ?: fallback[key]
+
+    private fun writeSecure(key: String, value: String?) {
+        val store = secureImpl
+        if (store != null) {
+            store.edit().apply {
+                if (value == null) remove(key) else putString(key, value)
+                apply()
+            }
+        } else {
+            fallback[key] = value
         }
     }
 
-    // ---------------------------------------------------------------- run channel
+    // ── run channel ─────────────────────────────────────────────────────────
 
-    var runChannel: String
-        get() = plain.getString(KEY_CHANNEL, CHANNEL_UNDECIDED) ?: CHANNEL_UNDECIDED
-        set(v) = plain.edit().putString(KEY_CHANNEL, v).apply()
+    var runChannel: RunChannel
+        get() {
+            val raw = plain.getString(BuildConfig.K_RUN_CHANNEL, null) ?: return RunChannel.UNDECIDED
+            return runCatching { RunChannel.valueOf(raw) }.getOrDefault(RunChannel.UNDECIDED)
+        }
+        set(v) = plain.edit().putString(BuildConfig.K_RUN_CHANNEL, v.name).apply()
 
-    // ---------------------------------------------------------------- destination URL
+    // ── destination URL + expiry ────────────────────────────────────────────
 
     var destinationUrl: String?
-        get() = secure.getString(KEY_DEST, null)
-        set(v) = if (v == null) secure.edit().remove(KEY_DEST).apply()
-                 else secure.edit().putString(KEY_DEST, v).apply()
+        get() = readSecure(BuildConfig.K_DEST_URL)
+        set(v) = writeSecure(BuildConfig.K_DEST_URL, v)
 
     var urlExpiresAt: Long
-        get() = plain.getLong(KEY_EXPIRES, 0L)
-        set(v) = plain.edit().putLong(KEY_EXPIRES, v).apply()
+        get() = plain.getLong(BuildConfig.K_EXPIRES, 0L)
+        set(v) = plain.edit().putLong(BuildConfig.K_EXPIRES, v).apply()
 
     fun isUrlValid(): Boolean {
         val url = destinationUrl ?: return false
@@ -55,12 +90,11 @@ class DataVault(ctx: Context) {
         return exp == 0L || System.currentTimeMillis() / 1000 < exp
     }
 
-    // ---------------------------------------------------------------- push URL (one-shot cold start)
+    // ── cold-start push URL (one-shot) ──────────────────────────────────────
 
     var coldPushUrl: String?
-        get() = secure.getString(KEY_PUSH_COLD, null)
-        set(v) = if (v == null) secure.edit().remove(KEY_PUSH_COLD).apply()
-                 else secure.edit().putString(KEY_PUSH_COLD, v).apply()
+        get() = readSecure(BuildConfig.K_PUSH_COLD)
+        set(v) = writeSecure(BuildConfig.K_PUSH_COLD, v)
 
     fun consumeColdPushUrl(): String? {
         val v = coldPushUrl
@@ -68,19 +102,19 @@ class DataVault(ctx: Context) {
         return v
     }
 
-    // ---------------------------------------------------------------- notification state
+    // ── notification state ──────────────────────────────────────────────────
 
     var notifSkipUntil: Long
-        get() = plain.getLong(KEY_NOTIF_SKIP, 0L)
-        set(v) = plain.edit().putLong(KEY_NOTIF_SKIP, v).apply()
+        get() = plain.getLong(BuildConfig.K_NOTIF_SKIP, 0L)
+        set(v) = plain.edit().putLong(BuildConfig.K_NOTIF_SKIP, v).apply()
 
     var notifGranted: Boolean
-        get() = plain.getBoolean(KEY_NOTIF_GRANTED, false)
-        set(v) = plain.edit().putBoolean(KEY_NOTIF_GRANTED, v).apply()
+        get() = plain.getBoolean(BuildConfig.K_NOTIF_GRANTED, false)
+        set(v) = plain.edit().putBoolean(BuildConfig.K_NOTIF_GRANTED, v).apply()
 
     var notifOsDenied: Boolean
-        get() = plain.getBoolean(KEY_NOTIF_OS_DENIED, false)
-        set(v) = plain.edit().putBoolean(KEY_NOTIF_OS_DENIED, v).apply()
+        get() = plain.getBoolean(BuildConfig.K_NOTIF_OS_DENIED, false)
+        set(v) = plain.edit().putBoolean(BuildConfig.K_NOTIF_OS_DENIED, v).apply()
 
     fun shouldShowNotifScreen(): Boolean {
         if (notifGranted) return false
@@ -89,48 +123,28 @@ class DataVault(ctx: Context) {
         return now >= notifSkipUntil
     }
 
-    fun skipNotifFor3Days() {
+    fun snoozeNotifPrompt() {
         val now = System.currentTimeMillis() / 1000
-        notifSkipUntil = now + 259_200L
+        notifSkipUntil = now + BuildConfig.PUSH_SNOOZE_SEC
     }
 
-    // ---------------------------------------------------------------- FCM token
+    // ── FCM token ───────────────────────────────────────────────────────────
 
     var fcmToken: String?
-        get() = secure.getString(KEY_FCM, null)
-        set(v) = if (v == null) secure.edit().remove(KEY_FCM).apply()
-                 else secure.edit().putString(KEY_FCM, v).apply()
+        get() = readSecure(BuildConfig.K_FCM)
+        set(v) = writeSecure(BuildConfig.K_FCM, v)
 
-    // ---------------------------------------------------------------- keyboard height
+    // ── keyboard resting height (per orientation) ───────────────────────────
 
-    /**
-     * The height the keyboard last came to rest at, per orientation. Mid-animation the
-     * system over-reports it, so KeyboardPan needs a figure it can trust from the
-     * first frame of the very first opening — see KeyboardPan's own notes.
-     */
     fun keyboardRest(portrait: Boolean): Int =
-        plain.getInt(if (portrait) KEY_KB_TALL else KEY_KB_WIDE, 0)
+        plain.getInt(if (portrait) BuildConfig.K_KB_PORTRAIT else BuildConfig.K_KB_LANDSCAPE, 0)
 
     fun rememberKeyboardRest(portrait: Boolean, height: Int) {
-        plain.edit().putInt(if (portrait) KEY_KB_TALL else KEY_KB_WIDE, height).apply()
+        plain.edit().putInt(
+            if (portrait) BuildConfig.K_KB_PORTRAIT else BuildConfig.K_KB_LANDSCAPE,
+            height
+        ).apply()
     }
 
-    // ----------------------------------------------------------------
-
-    companion object {
-        const val CHANNEL_UNDECIDED = "undecided"
-        const val CHANNEL_STREAM    = "stream"
-        const val CHANNEL_NATIVE    = "native"
-
-        private const val KEY_CHANNEL      = "run_ch"
-        private const val KEY_DEST         = "dest_u"
-        private const val KEY_EXPIRES      = "dest_exp"
-        private const val KEY_PUSH_COLD    = "push_c"
-        private const val KEY_NOTIF_SKIP   = "nf_skip"
-        private const val KEY_NOTIF_GRANTED = "nf_ok"
-        private const val KEY_NOTIF_OS_DENIED = "nf_os_no"
-        private const val KEY_FCM          = "fcm_t"
-        private const val KEY_KB_TALL      = "kb_t"
-        private const val KEY_KB_WIDE      = "kb_w"
-    }
+    private companion object { const val TAG = "DataVault" }
 }

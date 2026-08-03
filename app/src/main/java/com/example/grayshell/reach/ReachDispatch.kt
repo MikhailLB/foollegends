@@ -1,8 +1,10 @@
 package com.example.grayshell.reach
 
-import android.util.Log
 import com.example.grayshell.blueprint.AppBlueprint
 import com.example.grayshell.blueprint.ChannelResult
+import com.example.grayshell.core.Trace
+import com.example.grayshell.core.UrlGuard
+import com.example.grayshell.core.UserAgent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -12,7 +14,17 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class ReachDispatch(private val userAgent: String) {
+/**
+ * Config endpoint client. One responsibility, one method: POST the attribution
+ * body and return the parsed answer.
+ *
+ * The URL out of a successful response is checked against [UrlGuard] before it
+ * is handed back. A destination outside the allowlist is treated the same as
+ * `ok:false` — the app opens the native part, and the mode is not persisted
+ * (the endpoint did answer, but its answer was rejected by our own gate, so
+ * the "did the server rule on this install" question is still open next launch).
+ */
+class ReachDispatch {
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(AppBlueprint.configTimeoutMs, TimeUnit.MILLISECONDS)
@@ -23,65 +35,52 @@ class ReachDispatch(private val userAgent: String) {
 
     suspend fun fetchChannel(body: JSONObject): ChannelResult = withContext(Dispatchers.IO) {
         val endpoint = AppBlueprint.resolveConfigEndpoint()
-        Log.i(TAG, "▶ POST $endpoint")
-        Log.i(TAG, "▶ User-Agent: $userAgent")
-        Log.i(TAG, "▶ Body: ${body}")
-
         if (endpoint.isBlank()) {
-            Log.w(TAG, "Endpoint is blank — nobody to ask")
+            Trace.w(TAG, "endpoint is blank — nobody to ask")
             return@withContext ChannelResult.unreachable()
         }
+        Trace.i(TAG, "POST config endpoint")
         try {
             val req = Request.Builder()
                 .url(endpoint)
                 .addHeader("Content-Type", "application/json")
-                .addHeader("User-Agent", userAgent)
+                .addHeader("User-Agent", UserAgent.value)
                 .post(body.toString().toRequestBody(json))
                 .build()
 
             http.newCall(req).execute().use { resp ->
                 val code = resp.code
-                val raw  = resp.body?.string() ?: ""
-                Log.i(TAG, "◀ HTTP $code  body=${raw.take(500)}")
+                val raw = resp.body?.string().orEmpty()
+                Trace.i(TAG, "HTTP $code (${raw.length} chars)")
 
-                // Per spec: backend returns 404 when the user must NOT enter the WebView.
-                if (code == 404) {
-                    Log.i(TAG, "Backend returned 404 → NATIVE (white)")
-                    return@withContext ChannelResult.native()
-                }
-                if (code !in 200..299) {
-                    Log.w(TAG, "Non-success HTTP $code → NATIVE")
-                    return@withContext ChannelResult.native()
-                }
+                if (code == 404) return@withContext ChannelResult.native()
+                if (code !in 200..299) return@withContext ChannelResult.native()
                 parseResponse(raw)
             }
         } catch (e: Exception) {
-            // Nobody said no here — nobody said anything. The caller shows the game
-            // but must not write the answer down.
-            Log.e(TAG, "Request never landed", e)
+            Trace.w(TAG, "request never landed: ${e.message}")
             ChannelResult.unreachable()
         }
     }
 
     private fun parseResponse(raw: String): ChannelResult {
-        if (raw.isBlank()) {
-            Log.w(TAG, "Empty body → NATIVE")
-            return ChannelResult.native()
-        }
+        if (raw.isBlank()) return ChannelResult.native()
         return try {
-            val j   = JSONObject(raw)
-            val ok  = j.optBoolean("ok", false)
+            val j = JSONObject(raw)
+            val ok = j.optBoolean("ok", false)
             val url = j.optString("url", "")
             val exp = j.optLong("expires", 0L)
             if (ok && url.isNotBlank()) {
-                Log.i(TAG, "✓ ok=true url=$url expires=$exp → STREAM")
+                if (!UrlGuard.accepts(url)) {
+                    Trace.w(TAG, "endpoint URL rejected by allowlist")
+                    return ChannelResult.native()
+                }
                 ChannelResult.stream(url, exp)
             } else {
-                Log.i(TAG, "ok=$ok url=\"$url\" → NATIVE")
                 ChannelResult.native()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "JSON parse error → NATIVE: ${e.message}")
+            Trace.w(TAG, "JSON parse error: ${e.message}")
             ChannelResult.native()
         }
     }

@@ -69,9 +69,8 @@ class OfflinePortal : AppCompatActivity() {
         root.addView(btn)
 
         setContentView(root)
-        hideSystemUi()
+        com.example.grayshell.Fullscreen.apply(this)
 
-        // Auto-retry when connectivity is restored.
         scope.launch {
             wire.connectivityFlow.collect { online ->
                 if (online) tryRetry()
@@ -99,7 +98,6 @@ class OfflinePortal : AppCompatActivity() {
                 }
                 startActivity(next)
                 finish()
-                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             } else {
                 retryBtn?.text = "RETRY"
                 retryBtn?.isEnabled = true
@@ -122,19 +120,6 @@ class OfflinePortal : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         recreate()
-    }
-
-    private fun hideSystemUi() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                )
-        }
     }
 
     override fun onDestroy() {

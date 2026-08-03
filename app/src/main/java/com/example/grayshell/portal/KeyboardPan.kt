@@ -8,6 +8,7 @@ import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
+import com.example.grayshell.BuildConfig
 import com.example.grayshell.vault.DataVault
 import kotlin.math.max
 import kotlin.math.min
@@ -69,7 +70,8 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
     private var settledKb = 0
 
     private val probe = Runnable {
-        web?.evaluateJavascript("window.__kbReport && window.__kbReport();", null)
+        val name = BuildConfig.JS_KEYBOARD_SENTINEL + "Report"
+        web?.evaluateJavascript("window.$name && window.$name();", null)
     }
 
     /** Installs on the window root, once. */
@@ -133,7 +135,7 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
         web = view
         forget()
         view.translationY = 0f
-        view.addJavascriptInterface(Bridge(), BRIDGE)
+        view.addJavascriptInterface(Bridge(), BuildConfig.JS_BRIDGE_NAME)
     }
 
     /** A new page has nothing focused yet. Call from onPageStarted. */
@@ -261,10 +263,14 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
     }
 
     /** Reports where the focused field sits on screen. Inject into every page. */
-    val script: String = """
+    val script: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val sentinel  = BuildConfig.JS_KEYBOARD_SENTINEL
+        val docFlag   = sentinel + "D"
+        val bridge    = BuildConfig.JS_BRIDGE_NAME
+        """
         (function(){
-          if (window.__kb) return;
-          window.__kb = true;
+          if (window.$sentinel) return;
+          window.$sentinel = true;
 
           function editable(el){
             if (!el) return false;
@@ -279,7 +285,6 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
           }
 
           function box(el, win){
-            // In a rich editor the caret is what matters, not the whole editor.
             if (el.isContentEditable) {
               try {
                 var sel = win.getSelection();
@@ -292,10 +297,6 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
             return el.getBoundingClientRect();
           }
 
-          // Sign-in forms are often served inside a frame. Where the frame is ours to
-          // read, the search carries on inside it and the field is placed exactly;
-          // where it is another origin's, the frame's own outline is all there is to
-          // go on and the native side aims at that instead.
           function locate(){
             var el = document.activeElement;
             var win = window;
@@ -322,18 +323,12 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
           function report(){
             var at = locate();
             if (!at) return;
-            // Rects are counted from the top of the page's own viewport. Where the
-            // engine has slid that viewport for the keyboard, its top is no longer the
-            // top of the screen, and the difference is what turns a page position into
-            // the position the eye actually sees.
             var vv = window.visualViewport;
             var lift = vv ? vv.offsetTop : 0;
             var zoom = (vv && vv.scale) ? vv.scale : 1;
-            // Device pixels, so that nothing here depends on the page's viewport
-            // keeping the size it had when the reading was taken.
             var px = (window.devicePixelRatio || 1) * zoom;
             try {
-              $BRIDGE.focus(
+              $bridge.focus(
                 at.frame,
                 (at.top - lift) * px,
                 (at.bottom - lift + $MARGIN_CSS) * px
@@ -341,17 +336,11 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
             } catch(e) {}
           }
 
-          // Now, for the slide to ride the keyboard up in step with it, and again
-          // shortly after, in case the page moved the field once it had focus.
           function kick(){
             report();
             setTimeout(report, 200);
           }
 
-          // Belt and braces. The engine is kept from hearing about the keyboard, so
-          // its viewport should sit still throughout — but if a build of it finds out
-          // some other way and starts moving the page, every move is reported at once
-          // and the slide is recomputed against it, instead of piling on top.
           var queued = false;
           function soon(){
             if (queued) return;
@@ -367,20 +356,19 @@ class KeyboardPan(private val host: View, private val vault: DataVault) {
 
           function watch(doc){
             try {
-              if (!doc || doc.__kb) return;
-              doc.__kb = true;
+              if (!doc || doc.$docFlag) return;
+              doc.$docFlag = true;
               doc.addEventListener('focusin', kick, true);
             } catch(e) {}
           }
 
-          window.__kbReport = report;
+          window.${sentinel}Report = report;
           watch(document);
         })();
-    """.trimIndent()
+        """.trimIndent()
+    }
 
     private companion object {
-        const val BRIDGE = "KbPan"
-
         /** Breathing room under the field, in CSS pixels. */
         const val MARGIN_CSS = 10
 

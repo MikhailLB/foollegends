@@ -8,20 +8,48 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import com.google.firebase.messaging.FirebaseMessagingService
-import com.google.firebase.messaging.RemoteMessage
+import com.example.grayshell.BuildConfig
 import com.example.grayshell.R
+import com.example.grayshell.core.Trace
+import com.example.grayshell.core.UrlGuard
 import com.example.grayshell.startup.WelcomePortal
 import com.example.grayshell.vault.DataVault
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.URL
 
 /**
- * Firebase Cloud Messaging receiver. Different class name, package, and channel ID
- * from any other project in the portfolio.
+ * Firebase Cloud Messaging receiver. The class name, package and channel id
+ * are per-project (`.cursor/rules/kotlin_fingerprint.mdc`) — reached through
+ * [BuildConfig] rather than hardcoded here.
+ *
+ * URL handling:
+ *   * A URL that fails [UrlGuard] is dropped silently — a push tap must never
+ *     open a page the app cannot recognise.
+ *   * Warm URLs (shell alive) go straight to [PushBus] and are never saved.
+ *   * Cold URLs go into the vault and are consumed exactly once by the router.
+ *   * A user whose channel is NATIVE keeps their game: the URL becomes a
+ *     harmless notification, and the tap opens the launcher instead of the
+ *     WebView. Flipping a NATIVE user into a WebView after the fact is a
+ *     store-review problem, not a feature.
+ *
+ * Image fetch runs on a background scope, so a slow image URL never blocks
+ * the FCM service's main-thread callback.
  */
 class PushRelay : FirebaseMessagingService() {
 
-    // TODO(you): use a unique channel id per project (must match the manifest meta-data).
-    private val channelId = "app_push_channel"
+    private val bg = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onDestroy() {
+        bg.cancel()
+        super.onDestroy()
+    }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -30,47 +58,53 @@ class PushRelay : FirebaseMessagingService() {
 
     override fun onMessageReceived(msg: RemoteMessage) {
         super.onMessageReceived(msg)
-        val data    = msg.data
-        val notif   = msg.notification
-        val title   = data["title"]   ?: notif?.title   ?: return
-        val body    = data["body"]    ?: notif?.body    ?: return
-        val url     = data["url"]     ?: data["link"]   ?: ""
-        val imgUrl  = data["image"]   ?: notif?.imageUrl?.toString() ?: ""
+        val data = msg.data
+        val notif = msg.notification
+        val title = data["title"] ?: notif?.title ?: return
+        val body  = data["body"]  ?: notif?.body  ?: return
+        val rawUrl = data["url"] ?: data["link"] ?: ""
+        val imgUrl = data["image"] ?: notif?.imageUrl?.toString() ?: ""
 
-        // WebView on screen → load it there and post nothing. Per spec: warm URLs
-        // are never saved.
-        if (url.isNotBlank() && PushBus.onWarmUrl != null) {
+        val url = rawUrl.trim()
+        val urlOk = url.isNotEmpty() && UrlGuard.accepts(url)
+        if (url.isNotEmpty() && !urlOk) {
+            Trace.w(TAG, "push URL rejected by allowlist — showing text-only notification")
+        }
+
+        val vault = DataVault(applicationContext)
+
+        // Warm hand-off works for STREAM users only. NATIVE stays native.
+        if (urlOk && vault.runChannel == DataVault.RunChannel.STREAM &&
+            PushBus.onWarmUrl != null
+        ) {
             val delivered = runCatching { PushBus.handOver(url) }.getOrDefault(false)
             if (delivered) return
         }
 
-        // Cold-start case: save the URL so WelcomePortal can pick it up next launch.
-        val vault = DataVault(applicationContext)
-        if (url.isNotBlank()) vault.coldPushUrl = url
+        // Cold-start save is also STREAM-only. A NATIVE user gets the text; the
+        // launcher never sees the URL and never routes on it.
+        val stashUrl = if (urlOk && vault.runChannel != DataVault.RunChannel.NATIVE) url else ""
+        if (stashUrl.isNotEmpty()) vault.coldPushUrl = stashUrl
 
-        showNotification(title, body, url, imgUrl)
+        bg.launch { showNotification(title, body, stashUrl, imgUrl) }
     }
 
-    private fun showNotification(title: String, body: String, url: String, imgUrl: String) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private suspend fun showNotification(title: String, body: String, url: String, imgUrl: String) {
+        val ctx = applicationContext
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(nm)
 
-        // Route through WelcomePortal so it can re-check routing if the user somehow
-        // ended up in NATIVE mode again. Deliberately no CLEAR_TOP: it would tear
-        // down a live StreamPortal underneath, which is exactly the shell the warm
-        // hand-off needs still standing.
-        val tap = Intent(this, WelcomePortal::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val tap = Intent(ctx, WelcomePortal::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (url.isNotBlank()) putExtra(WelcomePortal.EXTRA_PUSH_URL, url)
             putExtra(WelcomePortal.EXTRA_FROM_PUSH, true)
         }
         val pi = PendingIntent.getActivity(
-            this, System.currentTimeMillis().toInt(), tap,
+            ctx, System.currentTimeMillis().toInt(), tap,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(this, channelId)
+        val builder = NotificationCompat.Builder(ctx, BuildConfig.FCM_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notif_flame)
             .setContentTitle(title)
             .setContentText(body)
@@ -78,32 +112,38 @@ class PushRelay : FirebaseMessagingService() {
             .setContentIntent(pi)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
 
-        if (imgUrl.isNotBlank()) {
-            try {
-                val bmp = BitmapFactory.decodeStream(
-                    java.net.URL(imgUrl).openConnection().inputStream
-                )
-                builder.setStyle(
-                    NotificationCompat.BigPictureStyle()
-                        .bigPicture(bmp)
-                        .bigLargeIcon(null as android.graphics.Bitmap?)
-                )
-            } catch (_: Exception) {
-                builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            }
+        val bitmap = if (imgUrl.isBlank()) null else withContext(Dispatchers.IO) {
+            runCatching {
+                URL(imgUrl).openConnection().apply {
+                    connectTimeout = 8_000
+                    readTimeout = 8_000
+                }.getInputStream().use { BitmapFactory.decodeStream(it) }
+            }.getOrNull()
+        }
+
+        if (bitmap != null) {
+            builder.setStyle(
+                NotificationCompat.BigPictureStyle()
+                    .bigPicture(bitmap)
+                    .bigLargeIcon(null as android.graphics.Bitmap?)
+            )
         } else {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
         }
 
-        nm.notify(NOTIF_ID++, builder.build())
+        withContext(Dispatchers.Main) {
+            nm.notify(NOTIF_ID++, builder.build())
+        }
     }
 
     private fun ensureChannel(nm: NotificationManager) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        if (nm.getNotificationChannel(channelId) != null) return
-        val ch = NotificationChannel(channelId, "Bonuses & Promos",
-            NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Promo and bonus alerts"
+        if (nm.getNotificationChannel(BuildConfig.FCM_CHANNEL_ID) != null) return
+        val ch = NotificationChannel(
+            BuildConfig.FCM_CHANNEL_ID,
+            BuildConfig.FCM_CHANNEL_TITLE,
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
             enableLights(true)
             enableVibration(true)
         }
@@ -111,6 +151,7 @@ class PushRelay : FirebaseMessagingService() {
     }
 
     companion object {
+        private const val TAG = "PushRelay"
         @Volatile private var NOTIF_ID = 1001
     }
 }

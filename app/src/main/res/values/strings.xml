@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- TODO(you): set your store-facing app name. -->
+    <!-- Bring-up filler only. Manifest uses ${grayAppLabel} placeholder, so
+         this string is never actually shown on a real launch. -->
     <string name="app_name">Gray Shell</string>
 </resources>

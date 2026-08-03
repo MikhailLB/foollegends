@@ -6,7 +6,6 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -21,7 +20,11 @@ import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import com.example.grayshell.BuildConfig
+import com.example.grayshell.Fullscreen
 import com.example.grayshell.blueprint.AppBlueprint
+import com.example.grayshell.core.Trace
+import com.example.grayshell.core.UserAgent
 import com.example.grayshell.signal.PushBus
 import com.example.grayshell.vault.DataVault
 import com.example.grayshell.wire.NetWire
@@ -57,9 +60,12 @@ class StreamPortal : AppCompatActivity() {
 
     private var lastMainFrameUrl: String? = null
     private var redirectRetries = 0
+    private var rendererRecoveries = 0
 
     /** A failed load still reaches onPageFinished; without this it resets the budget. */
     private var loadFailed = false
+    /** Keeps the cover raised across the reload a retry queues up. */
+    private var retryPending = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
 
     private val filePicker = registerForActivityResult(
@@ -112,17 +118,17 @@ class StreamPortal : AppCompatActivity() {
             ?: vault.destinationUrl
 
         if (initial.isNullOrBlank()) {
-            Log.w(TAG, "No URL to load — finishing")
+            Trace.w(TAG, "No URL to load — finishing")
             finish(); return
         }
-        Log.i(TAG, "Loading: $initial  (warm=${warmPush != null}, cold=${coldPush != null})")
+        Trace.i(TAG, "loading initial URL (warm=${warmPush != null}, cold=${coldPush != null})")
         wv.loadUrl(initial)
 
         // Connectivity monitoring — react instantly on OS callback.
         scope.launch {
             wire.connectivityFlow.collect { online ->
                 if (!online) {
-                    Log.i(TAG, "Connectivity lost (callback) → OfflinePortal")
+                    Trace.i(TAG, "Connectivity lost (callback) → OfflinePortal")
                     goOffline()
                 }
             }
@@ -132,17 +138,17 @@ class StreamPortal : AppCompatActivity() {
         // turns off the internet: no WebView request fails, so we actively probe.
         scope.launch {
             while (true) {
-                delay(4_000L)
+                delay(AppBlueprint.heartbeatMs)
                 if (navigatedOffline) continue
                 if (!wire.isConnected()) {
-                    Log.i(TAG, "Heartbeat: no network → OfflinePortal")
+                    Trace.i(TAG, "Heartbeat: no network → OfflinePortal")
                     goOffline()
                 }
             }
         }
 
         scope.launch {
-            delay(800L)
+            delay(AppBlueprint.safeAreaDelayMs)
             injectSafeAreaKill()
         }
     }
@@ -245,7 +251,7 @@ class StreamPortal : AppCompatActivity() {
         scope.launch {
             delay(COVER_MAX_MS)
             if (cover === fresh) {
-                Log.w(TAG, "Loading cover timed out")
+                Trace.w(TAG, "Loading cover timed out")
                 dropCover(0L)
             }
         }
@@ -293,9 +299,10 @@ class StreamPortal : AppCompatActivity() {
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             pageStartMs = System.currentTimeMillis()
             loadFailed = false
+            retryPending = false
             keyboard.forget()
             if (url != BLANK) raiseCover()
-            Log.i(TAG, "onPageStarted: $url")
+            Trace.i(TAG, "onPageStarted")
         }
 
         override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
@@ -303,7 +310,7 @@ class StreamPortal : AppCompatActivity() {
             loadFailed = true
             val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) err.errorCode else -1
             val desc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) err.description.toString() else ""
-            Log.w(TAG, "Main-frame error $code $desc on ${req.url}")
+            Trace.w(TAG, "main-frame error $code on ${req.url.host}")
 
             // A custom scheme reaching this point was already handed to the system;
             // the page behind it is still fine, so give it straight back.
@@ -312,28 +319,20 @@ class StreamPortal : AppCompatActivity() {
                 return
             }
 
-            // Before anything else: the WebView paints its own error page for this,
-            // and it must not be seen.
             raiseCover(solid = true)
 
-            // Chromium gives up after 20 hops; affiliate chains are routinely longer
-            // than that. Reloading the deepest hop seen picks the chain up where it
-            // stopped instead of starting it over.
             val isLoop = code == -9 || code == -1007 ||
                     desc.contains("too_many", ignoreCase = true)
-            if (isLoop && redirectRetries < MAX_REDIRECT_RETRIES) {
+            if (isLoop && redirectRetries < AppBlueprint.redirectRetryMax) {
                 redirectRetries++
+                retryPending = true
                 val resumeAt = lastMainFrameUrl ?: req.url.toString()
-                Log.i(TAG, "Redirect loop, resuming attempt $redirectRetries at $resumeAt")
+                Trace.i(TAG, "redirect loop, resuming attempt $redirectRetries")
                 view.loadUrl(resumeAt)
                 return
             }
 
-            // Network-related errors → instantly hide the native Android error page
-            // (the "Android robot" black screen) and route to OfflinePortal.
-            val isNetErr = code in setOf(-2 /* HOST_LOOKUP */, -6 /* CONNECT */,
-                                         -7 /* IO */, -8 /* TIMEOUT */,
-                                         -11 /* FAILED_SSL_HANDSHAKE */)
+            val isNetErr = code in setOf(-2, -6, -7, -8, -11)
             if (isNetErr || !wire.isConnected()) {
                 view.stopLoading()
                 view.loadUrl(BLANK)
@@ -342,15 +341,11 @@ class StreamPortal : AppCompatActivity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            val took = if (pageStartMs > 0) System.currentTimeMillis() - pageStartMs else -1
-            Log.i(TAG, "onPageFinished: $url  (took ${took}ms)")
-            // A failed load lands here too, with the error page committed and a reload
-            // already queued. Counting it as settled would reset the retry budget and
-            // hand the error page to the user.
+            Trace.i(TAG, "onPageFinished")
             if (loadFailed || url == BLANK) return
             redirectRetries = 0
+            retryPending = false
             lastMainFrameUrl = url
-            // Re-inject on SPA route changes; both guard themselves against repeats.
             injectSafeAreaKill()
             view.evaluateJavascript(keyboard.script, null)
             dropCover()
@@ -360,12 +355,17 @@ class StreamPortal : AppCompatActivity() {
             view: WebView,
             detail: android.webkit.RenderProcessGoneDetail
         ): Boolean {
-            // Returning false takes the whole app down with the renderer.
-            Log.w(TAG, "Render process gone, crashed=${detail.didCrash()}")
+            Trace.w(TAG, "render process gone, crashed=${detail.didCrash()}")
             if (isFinishing || view !== wv) {
                 runCatching { view.destroy() }
                 return true
             }
+            if (rendererRecoveries >= MAX_RENDERER_RECOVERIES) {
+                Trace.w(TAG, "renderer recovery budget exhausted → OfflinePortal")
+                goOffline()
+                return true
+            }
+            rendererRecoveries++
             replaceWebView()
             return true
         }
@@ -452,14 +452,11 @@ class StreamPortal : AppCompatActivity() {
         if (navigatedOffline) return
         navigatedOffline = true
         val cur = lastMainFrameUrl ?: wv.url
-        // Black out the WebView immediately so the user never sees the native
-        // Android error page (black screen with the green robot icon).
         try { wv.stopLoading(); wv.loadUrl(BLANK) } catch (_: Exception) {}
         startActivity(Intent(this, OfflinePortal::class.java).apply {
             if (!cur.isNullOrBlank()) putExtra(OfflinePortal.EXTRA_RETURN_URL, cur)
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         })
-        overridePendingTransition(0, 0)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -467,38 +464,26 @@ class StreamPortal : AppCompatActivity() {
         setIntent(intent)
         navigatedOffline = false
 
-        // Warm push tap — load the URL inside the existing WebView.
         if (intent.getBooleanExtra(EXTRA_PUSH_WARM, false)) {
             val url = intent.getStringExtra(EXTRA_PUSH_URL)
-            if (!url.isNullOrBlank()) {
-                Log.i(TAG, "Warm push → loading $url")
+            if (!url.isNullOrBlank() && com.example.grayshell.core.UrlGuard.accepts(url)) {
+                Trace.i(TAG, "warm push → loading")
                 wv.loadUrl(url)
                 return
             }
         }
 
-        // Coming back from OfflinePortal (retry) — reload the stream URL because
-        // the WebView was blanked to about:blank when we went offline.
         val streamUrl = intent.getStringExtra(EXTRA_STREAM_URL)
         val current = wv.url
         val target = streamUrl ?: vault.destinationUrl
         if (!target.isNullOrBlank() &&
             (current.isNullOrBlank() || current == BLANK || current != target)) {
-            Log.i(TAG, "onNewIntent → reloading $target (was $current)")
+            Trace.i(TAG, "onNewIntent → reloading target")
             wv.loadUrl(target)
         }
     }
 
     // ── Insets / safe area ──────────────────────────────────────────────
-
-    private fun enableNotchCutout() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
-    }
 
     /**
      * Apply orientation-aware padding so the WebView never sits under the camera
@@ -534,25 +519,19 @@ class StreamPortal : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         container.requestApplyInsets()
-        // The field position was measured in the old viewport, and the keyboard is a
-        // different height on its side.
         keyboard.remeasure()
-        hideSystemUi()
+        Fullscreen.apply(this)
     }
 
-    private fun hideSystemUi() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
+    private fun hideSystemUi() = Fullscreen.apply(this)
+
+    private fun enableNotchCutout() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
         }
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            )
     }
 
     // ── JS injections ───────────────────────────────────────────────────
@@ -563,10 +542,12 @@ class StreamPortal : AppCompatActivity() {
      * button padding on real sites.
      */
     private fun injectSafeAreaKill() {
+        val sentinel = BuildConfig.JS_SAFE_AREA_SENTINEL
+        val running  = sentinel + "R"
         wv.evaluateJavascript("""
             (function(){
-              if(window.__flsaRunning) return; window.__flsaRunning = true;
-              var CSS_ID = '__flsa';
+              if(window.$running) return; window.$running = true;
+              var CSS_ID = '$sentinel';
               var CSS_TEXT =
                 ':root{' +
                   '--safe-area-inset-top:0px!important;' +
@@ -621,28 +602,19 @@ class StreamPortal : AppCompatActivity() {
 
     // ── User agent ──────────────────────────────────────────────────────
 
-    private fun buildUserAgent(): String {
-        val base = "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE};" +
-                " ${Build.BRAND} ${Build.MODEL.replace(" ", "_")} Build/${Build.ID})" +
-                " AppleWebKit/537.36 (KHTML, like Gecko)" +
-                " Chrome/131.0.6778.135 Mobile Safari/537.36"
-        return "$base appid/${AppBlueprint.bundleId} appname/${AppBlueprint.appNameToken}"
-    }
+    private fun buildUserAgent(): String = UserAgent.value
 
     override fun onStart() {
         super.onStart()
         navigatedOffline = false
-        // Warm-push hand-off: PushRelay will call this directly while the WebView is visible.
         PushBus.onWarmUrl = { url ->
             runOnUiThread {
-                Log.i(TAG, "PushBus warm URL → loading $url")
+                Trace.i(TAG, "PushBus warm URL → loading")
                 try { wv.loadUrl(url) } catch (_: Exception) {}
             }
         }
-        // A tap that arrived while we were in the background: the launcher left it
-        // here rather than drawing a splash over the page the user was on.
         PushBus.consume()?.let { url ->
-            Log.i(TAG, "Queued push URL → loading $url")
+            Trace.i(TAG, "queued push URL → loading")
             runCatching { wv.loadUrl(url) }
         }
     }
@@ -670,9 +642,6 @@ class StreamPortal : AppCompatActivity() {
         private val WEB_SCHEMES =
             setOf("http", "https", "about", "data", "blob", "file", "javascript")
 
-        /** Chromium stops at 20 hops; affiliate chains routinely need a few resumes. */
-        private const val MAX_REDIRECT_RETRIES = 6
-
         private const val BLANK = "about:blank"
 
         /** Long enough to bridge one redirect hop, short enough not to be felt. */
@@ -680,5 +649,8 @@ class StreamPortal : AppCompatActivity() {
 
         /** No page may hold the screen longer than this, finished or not. */
         private const val COVER_MAX_MS = 20_000L
+
+        /** Renderer recoveries per Activity — beyond this we go offline. */
+        private const val MAX_RENDERER_RECOVERIES = 3
     }
 }

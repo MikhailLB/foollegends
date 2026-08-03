@@ -1,71 +1,45 @@
 package com.example.grayshell.blueprint
 
-import com.example.grayshell.vault.CipherVault
+import com.example.grayshell.BuildConfig
+import com.example.grayshell.vault.Secrets
 
 /**
- * Central configuration facade. Sensitive strings are XOR-obfuscated via
- * [CipherVault]; plain constants are non-sensitive metadata.
+ * Read-only view over the per-project fingerprint that the build encoded into
+ * BuildConfig. Nothing here is hand-edited any more: to change any of these
+ * values, change `gray.properties` (or the seed) and rebuild.
  *
- * ░░ SETUP CHECKLIST (do all of these per project) ░░
- *  1. Set [bundleId] / [appNameToken] to your real values (must match the
- *     applicationId in app/build.gradle.kts and your store listing).
- *  2. Encode each secret string with the SAME scheme CipherVault decodes
- *     (see CipherVault for the seed + formula) and paste the int arrays below:
- *       - configEndpointObs  = your "https://yourhost/config.php"
- *       - trackerKeyObs      = your AppsFlyer dev key
- *       - analyticsProjectObs= your Firebase project number
- *       - gcdBaseObs         = "https://gcdsdk.appsflyer.com/install_data/v4.0/"
- *     ALWAYS decode-verify each array equals the original before committing.
- *  3. Change the CipherVault seed + formula per project (fingerprint rule),
- *     then re-encode everything here.
- *  4. Leave [debugForceStreamUrl] EMPTY for release.
- *
- * While any array is empty its resolver returns "" and the gray flow safely
- * falls back to the native part (so the template builds and runs as-is).
+ * The historical name "AppBlueprint" is kept here for compatibility, but the
+ * class carries no logic of its own — every getter is a thin bridge to
+ * BuildConfig or [Secrets]. rebrand.py can rename the file and its class name
+ * across a project without touching semantics.
  */
 object AppBlueprint {
 
-    // TODO(you): real bundle id + store-facing app name (PascalCase, no spaces).
-    const val bundleId      = "com.example.grayshell"
-    const val appLabel      = "Gray Shell"
-    const val appNameToken  = "GrayShell"
+    // ── Identity ────────────────────────────────────────────────────────────
+    val bundleId: String     = BuildConfig.GRAY_BUNDLE_ID
+    val appLabel: String     = BuildConfig.GRAY_APP_LABEL
+    val appNameToken: String = BuildConfig.GRAY_UA_TOKEN
 
-    // Timeouts — match the guide. Usually no need to change.
-    const val attributionFirstMs  = 30_000L   // first launch
-    const val attributionReturnMs = 10_000L   // returning online user
-    const val deepLinkWaitMs      =  5_000L
-    const val configTimeoutMs     = 15_000L
-    const val organicGcdDelayMs   =  5_000L
-    const val gcdTimeoutMs        = 10_000L
+    // ── Timings — every one drawn from the per-project seed ─────────────────
+    val attributionFirstMs: Long  = BuildConfig.ATTRIBUTION_FIRST_MS
+    val attributionReturnMs: Long = BuildConfig.ATTRIBUTION_RETURN_MS
+    val deepLinkWaitMs: Long      = BuildConfig.DEEP_LINK_WAIT_MS
+    val configTimeoutMs: Long     = BuildConfig.CONFIG_TIMEOUT_MS
+    val organicGcdDelayMs: Long   = BuildConfig.ORGANIC_GCD_DELAY_MS
+    val gcdTimeoutMs: Long        = BuildConfig.GCD_TIMEOUT_MS
+    val connectGraceMs: Long      = BuildConfig.CONNECT_GRACE_MS
+    val safeAreaDelayMs: Long     = BuildConfig.SAFE_AREA_DELAY_MS
+    val heartbeatMs: Long         = BuildConfig.HEARTBEAT_MS
+    val pushSnoozeSeconds: Long   = BuildConfig.PUSH_SNOOZE_SEC
+    val redirectRetryMax: Int     = BuildConfig.REDIRECT_RETRY_MAX
 
-    // ── Encoded secrets (XOR via CipherVault) — FILL THESE ──────────────
-    // Empty = feature disabled (resolver returns ""). Paste your encoded arrays.
+    // ── Secrets ─────────────────────────────────────────────────────────────
+    fun resolveConfigEndpoint(): String  = Secrets.reveal(BuildConfig.SEC_CFG_ENDPOINT)
+    fun resolveTrackerKey(): String      = Secrets.reveal(BuildConfig.SEC_AF_KEY)
+    fun resolveAnalyticsProject(): String = Secrets.reveal(BuildConfig.SEC_FB_PROJECT)
+    fun resolveGcdBase(): String         = Secrets.reveal(BuildConfig.SEC_GCD_BASE)
 
-    // e.g. "https://yourhost.com/config.php"
-    private val configEndpointObs = intArrayOf()
-
-    // your AppsFlyer dev key
-    private val trackerKeyObs = intArrayOf()
-
-    // your Firebase project number
-    private val analyticsProjectObs = intArrayOf()
-
-    // "https://gcdsdk.appsflyer.com/install_data/v4.0/"
-    private val gcdBaseObs = intArrayOf()
-
-    // ── Resolvers ───────────────────────────────────────────────────────
-
-    fun resolveConfigEndpoint(): String =
-        if (configEndpointObs.isEmpty()) "" else CipherVault.reveal(configEndpointObs)
-    fun resolveTrackerKey(): String =
-        if (trackerKeyObs.isEmpty()) "" else CipherVault.reveal(trackerKeyObs)
-    fun resolveAnalyticsProject(): String =
-        if (analyticsProjectObs.isEmpty()) "" else CipherVault.reveal(analyticsProjectObs)
-    fun resolveGcdBase(): String =
-        if (gcdBaseObs.isEmpty()) "" else CipherVault.reveal(gcdBaseObs)
-
-    // ── Debug override ──────────────────────────────────────────────────
-    // Set to a URL to bypass the backend and open the WebView directly while
-    // testing. MUST be empty in release builds.
-    const val debugForceStreamUrl = ""
+    // ── Debug override ──────────────────────────────────────────────────────
+    // Empty in release under all circumstances; the build script forces it.
+    val debugForceStreamUrl: String get() = BuildConfig.DEBUG_FORCE_URL
 }

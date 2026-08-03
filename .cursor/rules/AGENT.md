@@ -41,7 +41,7 @@ goGray()/goNative()          handOver { }: the bar fills to 100% first, always
 ### `portal/`
 | File | Role | Do not get wrong | See |
 |---|---|---|---|
-| `StreamPortal.kt` | Full-screen WebView shell | `loadFailed` + `retryPending` guard the cover and the retry budget; renderer recovery is capped | webview, pitfalls #24 |
+| `StreamPortal.kt` | Full-screen WebView shell | `deepestHop` (retry resumes here) and `lastMainFrameUrl` (last settled) are **different fields**. The cover is only for the session's first page. No `onReceivedError` branch may end without navigating or dropping the cover | webview, pitfalls #10 #30 #31 #33 |
 | `KeyboardPan.kt` | Slides the WebView; never resizes | IME insets are stripped from the WebView; clamp to the *settled* height, remembered per orientation | keyboard |
 | `AlertPortal.kt` | Push-permission screen | Snooze on skip; OS "deny forever" is permanent | guide |
 | `OfflinePortal.kt` | No-wifi + Retry + auto-retry | With no return URL it restarts the router, so AppsFlyer is asked for the first time | pitfalls #20 |

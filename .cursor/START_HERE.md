@@ -86,7 +86,7 @@ app\build\outputs\apk\debug\app-debug.apk` deploys.
 | WebView shell contract | `.cursor/rules/kotlin_webview.mdc` + `portal/StreamPortal.kt` |
 | Keyboard | `.cursor/rules/kotlin_keyboard.mdc` + `portal/KeyboardPan.kt` |
 | User-Agent + appid/appname decision | `.cursor/rules/kotlin_user_agent.mdc` |
-| Real bugs + fixes (29 entries) | `.cursor/rules/kotlin_gray_pitfalls.mdc` |
+| Real bugs + fixes (34 entries) | `.cursor/rules/kotlin_gray_pitfalls.mdc` |
 | Screen artwork contract | `.cursor/rules/custom_screens.md` |
 
 ## 5. Invariants — things that must never break
@@ -164,7 +164,7 @@ foollegends/
     │   ├── kotlin_webview.mdc             (shell spec)
     │   ├── kotlin_keyboard.mdc            (pan, not resize)
     │   ├── kotlin_user_agent.mdc          (UA contract)
-    │   ├── kotlin_gray_pitfalls.mdc       (29 real bugs + fixes)
+    │   ├── kotlin_gray_pitfalls.mdc       (34 real bugs + fixes)
     │   ├── kotlin_fingerprint.mdc         (how uniqueness is generated)
     │   ├── play_moderation_hardening.mdc  (what clusters a portfolio)
     │   └── custom_screens.md              (artwork contract)

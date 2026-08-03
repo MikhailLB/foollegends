@@ -73,9 +73,7 @@ class WelcomePortal : AppCompatActivity() {
         vault = DataVault(applicationContext)
         wire  = NetWire(applicationContext)
 
-        val pushUrl = intent.takeIf { it.getBooleanExtra(EXTRA_FROM_PUSH, false) }
-            ?.getStringExtra(EXTRA_PUSH_URL)
-            ?.takeIf { it.isNotBlank() && UrlGuard.accepts(it) }
+        val pushUrl = pushUrlFrom(intent)
 
         // Warm-tap hand-off: the shell is still alive, take the user right back
         // to the page they were on and drop this splash entirely.
@@ -304,12 +302,30 @@ class WelcomePortal : AppCompatActivity() {
             }
         }
 
+    /**
+     * The URL a notification tap carried, in either shape it can arrive in.
+     *
+     * A data-only message reaches [PushRelay], which builds the tap intent with
+     * this class's own extras. A message that carries a `notification` block is
+     * drawn by the Firebase SDK itself whenever the app is not in the
+     * foreground — that path never runs our service, and the tap opens the
+     * launcher with the raw `data` payload as plain string extras instead.
+     * Reading only our own extras is why a pushed link was dropped and the
+     * shell reopened on the previously saved page (pitfalls #32).
+     */
+    private fun pushUrlFrom(intent: Intent): String? {
+        val own = if (intent.getBooleanExtra(EXTRA_FROM_PUSH, false))
+            intent.getStringExtra(EXTRA_PUSH_URL) else null
+        val raw = intent.getStringExtra(FCM_KEY_URL) ?: intent.getStringExtra(FCM_KEY_LINK)
+        return (own ?: raw)?.trim()?.takeIf { it.isNotBlank() && UrlGuard.accepts(it) }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        val fromPush = intent.getBooleanExtra(EXTRA_FROM_PUSH, false)
-        val pushUrl  = intent.getStringExtra(EXTRA_PUSH_URL)?.takeIf { UrlGuard.accepts(it) }
+        setIntent(intent)
+        val pushUrl = pushUrlFrom(intent)
 
-        if (fromPush && !pushUrl.isNullOrBlank()) {
+        if (!pushUrl.isNullOrBlank()) {
             when (vault.runChannel) {
                 RunChannel.NATIVE -> {
                     Trace.i(TAG, "Push tap while NATIVE — game stays open")
@@ -330,10 +346,7 @@ class WelcomePortal : AppCompatActivity() {
                     )
                     finish()
                 }
-                RunChannel.UNDECIDED -> {
-                    vault.coldPushUrl = pushUrl
-                    setIntent(intent)
-                }
+                RunChannel.UNDECIDED -> vault.coldPushUrl = pushUrl
             }
         }
     }
@@ -347,5 +360,9 @@ class WelcomePortal : AppCompatActivity() {
         private const val TAG = "WelcomePortal"
         const val EXTRA_FROM_PUSH = "from_push"
         const val EXTRA_PUSH_URL  = "push_url"
+
+        /** Payload keys PushRelay reads, and the ones the SDK forwards verbatim. */
+        private const val FCM_KEY_URL  = "url"
+        private const val FCM_KEY_LINK = "link"
     }
 }

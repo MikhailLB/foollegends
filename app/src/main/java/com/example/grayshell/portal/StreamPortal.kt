@@ -58,12 +58,25 @@ class StreamPortal : AppCompatActivity() {
     private lateinit var keyboard: KeyboardPan
     private val scope = CoroutineScope(Dispatchers.Main)
 
+    /** Last main-frame URL that actually settled. What a renderer recovery reloads. */
     private var lastMainFrameUrl: String? = null
+
+    /**
+     * Deepest main-frame URL seen, settled or not. A redirect loop is resumed
+     * from here rather than from the last settled page — restarting the chain
+     * from its entry point only walks into the same loop again (pitfalls #30).
+     */
+    private var deepestHop: String? = null
+
     private var redirectRetries = 0
+    /** One fallback to the configured entry point per settled page. */
+    private var entryPointRetried = false
     private var rendererRecoveries = 0
 
     /** A failed load still reaches onPageFinished; without this it resets the budget. */
     private var loadFailed = false
+    /** True once one page of this session has rendered — gates the cover. */
+    private var firstPageSettled = false
     /** Keeps the cover raised across the reload a retry queues up. */
     private var retryPending = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -204,29 +217,28 @@ class StreamPortal : AppCompatActivity() {
     private var coverJob: Job? = null
 
     /**
-     * Hides whatever the page is doing behind a scrim and a spinner, so the user only
-     * ever sees a page that is finished — including through a chain of redirects,
-     * which never gets a moment on screen of its own.
+     * Hides the empty view behind a scrim and a spinner while the session's
+     * **first** page resolves. Nothing else earns a cover: every later
+     * navigation, including every hop of an affiliate redirect chain, resolves
+     * behind the page the user is already reading, so they see the destination
+     * site appear rather than a loading screen sitting between them and it.
      *
      * Note what this is NOT: a snapshot of the view. `WebView.draw` into a software
      * canvas on a hardware-accelerated view yields solid black, which is precisely the
      * "black screen between redirects" this replaced.
      *
-     * @param solid hides the page completely instead of dimming it. Used after a
-     *   failed load, where what sits underneath is the WebView's own error page.
      */
-    private fun raiseCover(solid: Boolean = false) {
+    private fun raiseCover() {
         coverJob?.cancel()
         coverJob = null
         val existing = cover
         if (existing != null) {
             existing.animate().cancel()
             existing.alpha = 1f
-            if (solid) existing.setBackgroundColor(Color.BLACK)
             return
         }
         val fresh = FrameLayout(this).apply {
-            setBackgroundColor(if (solid) Color.BLACK else 0xB3000000.toInt())
+            setBackgroundColor(COVER_SCRIM)
             isClickable = true
             addView(
                 android.widget.ProgressBar(this@StreamPortal).apply {
@@ -285,7 +297,7 @@ class StreamPortal : AppCompatActivity() {
             val scheme = u.substringBefore(':').lowercase()
             return when {
                 scheme in WEB_SCHEMES -> {
-                    if (req.isForMainFrame) lastMainFrameUrl = u
+                    if (req.isForMainFrame) deepestHop = u
                     false  // load inside this WebView
                 }
                 scheme == "intent" -> { openIntentUri(u); true }
@@ -301,7 +313,13 @@ class StreamPortal : AppCompatActivity() {
             loadFailed = false
             retryPending = false
             keyboard.forget()
-            if (url != BLANK) raiseCover()
+            // shouldOverrideUrlLoading does not see every server-side 30x, so the
+            // URL the engine actually committed to is the other half of the trail.
+            if (url != BLANK) deepestHop = url
+            // Only the very first page of the session is covered. After that the
+            // previous page stays on screen while the next hop resolves, so a
+            // redirect chain hands the user its destination instead of a scrim.
+            if (url != BLANK && !firstPageSettled) raiseCover()
             Trace.i(TAG, "onPageStarted")
         }
 
@@ -319,16 +337,10 @@ class StreamPortal : AppCompatActivity() {
                 return
             }
 
-            raiseCover(solid = true)
-
             val isLoop = code == -9 || code == -1007 ||
                     desc.contains("too_many", ignoreCase = true)
-            if (isLoop && redirectRetries < AppBlueprint.redirectRetryMax) {
-                redirectRetries++
-                retryPending = true
-                val resumeAt = lastMainFrameUrl ?: req.url.toString()
-                Trace.i(TAG, "redirect loop, resuming attempt $redirectRetries")
-                view.loadUrl(resumeAt)
+            if (isLoop) {
+                handleRedirectLoop(view, req.url.toString())
                 return
             }
 
@@ -337,15 +349,23 @@ class StreamPortal : AppCompatActivity() {
                 view.stopLoading()
                 view.loadUrl(BLANK)
                 goOffline()
+                return
             }
+
+            // Anything else: the page is what it is. Never leave the user under
+            // an overlay waiting on a load that already failed.
+            dropCover(0L)
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             Trace.i(TAG, "onPageFinished")
             if (loadFailed || url == BLANK) return
             redirectRetries = 0
+            entryPointRetried = false
             retryPending = false
+            firstPageSettled = true
             lastMainFrameUrl = url
+            deepestHop = url
             injectSafeAreaKill()
             view.evaluateJavascript(keyboard.script, null)
             dropCover()
@@ -369,6 +389,67 @@ class StreamPortal : AppCompatActivity() {
             replaceWebView()
             return true
         }
+    }
+
+    /**
+     * ERR_TOO_MANY_REDIRECTS. Chromium gives up after 20 hops and affiliate
+     * chains are routinely longer, so this is an ordinary condition rather than
+     * a failure — the chain has to be resumed, not restarted.
+     *
+     * Three things this gets right that the obvious version does not:
+     *
+     *  - It resumes from [deepestHop]. Reloading the entry point walks the same
+     *    hops again and burns the budget on the identical loop. `lastMainFrameUrl`
+     *    is the wrong field for this: `onPageFinished` overwrites it with the
+     *    page that settled, so by error time it names the chain's start.
+     *  - It posts the reload instead of calling `loadUrl` from inside the
+     *    callback. The engine is still unwinding the failed navigation at that
+     *    point and swallows or defers a re-entrant load — which is where the
+     *    multi-second stalls between attempts came from.
+     *  - When the budget is gone it does not leave the user under an overlay
+     *    until the cover's own timeout. ERR_TOO_MANY_REDIRECTS is not in the
+     *    network-error set, so before this the exhausted path did nothing at all.
+     *
+     * Nothing here raises the cover. A loop in an affiliate chain is dead time
+     * mid-navigation, not a state worth putting a screen in front of the user
+     * for — the retry is queued within 60 ms and the page underneath is
+     * replaced before it has drawn.
+     */
+    private fun handleRedirectLoop(view: WebView, failedUrl: String) {
+        if (redirectRetries < AppBlueprint.redirectRetryMax) {
+            redirectRetries++
+            retryPending = true
+            val resumeAt = deepestHop ?: failedUrl
+            Trace.i(TAG, "redirect loop, resuming attempt $redirectRetries")
+            postLoad(view, resumeAt)
+            return
+        }
+
+        // Budget spent. The chain itself is stuck; the entry point the backend
+        // named usually still resolves, and cookies picked up along the way are
+        // often what the chain was missing.
+        val entryPoint = vault.destinationUrl
+        if (!entryPointRetried && !entryPoint.isNullOrBlank() && entryPoint != deepestHop) {
+            entryPointRetried = true
+            retryPending = true
+            Trace.w(TAG, "redirect budget spent → retrying the configured entry point")
+            postLoad(view, entryPoint)
+            return
+        }
+
+        Trace.w(TAG, "redirect chain unresolvable — handing the page back")
+        retryPending = false
+        dropCover(0L)
+    }
+
+    /**
+     * A load queued out of a WebViewClient callback. The short pause is dead
+     * time in the middle of a navigation, not a delay the user can feel.
+     */
+    private fun postLoad(view: WebView, url: String) {
+        view.postDelayed({
+            if (!isFinishing && !isDestroyed) view.loadUrl(url)
+        }, RETRY_PAUSE_MS)
     }
 
     /**
@@ -537,9 +618,16 @@ class StreamPortal : AppCompatActivity() {
     // ── JS injections ───────────────────────────────────────────────────
 
     /**
-     * Safe-area CSS kill — targets ONLY html/body/common root containers and the
-     * safe-area CSS vars. We do NOT use a universal "*" selector — that breaks
-     * button padding on real sites.
+     * Safe-area CSS kill. The window already pads for the cutout, so a page that
+     * also honours `env(safe-area-inset-*)` would leave a second empty band on
+     * top of ours. Zeroing the variables removes that band.
+     *
+     * What it must not do is lay a finger on the page's own box model. An
+     * earlier version zeroed `padding-left`, `padding-right` and `margin` on
+     * `html, body, #__nuxt, #app, #root` — but sites build their gutters with
+     * exactly those declarations, so the whole layout got squeezed flat against
+     * both edges (pitfalls #10). Only `padding-top`, and only on the chrome
+     * wrappers that are known to add a status-bar offset of their own.
      */
     private fun injectSafeAreaKill() {
         val sentinel = BuildConfig.JS_SAFE_AREA_SENTINEL
@@ -559,12 +647,8 @@ class StreamPortal : AppCompatActivity() {
                   '--safe-top:0px!important;--safe-right:0px!important;' +
                   '--safe-bottom:0px!important;--safe-left:0px!important;' +
                 '}' +
-                'html,body,#__nuxt,#__layout,#app,#root,' +
-                '.gameview-mobile-header{' +
+                '.gameview-mobile-header,.app-header{' +
                   'padding-top:0!important;' +
-                  'padding-left:0!important;' +
-                  'padding-right:0!important;' +
-                  'margin-top:0!important;' +
                 '}';
               function apply(){
                 var head = document.head || document.documentElement;
@@ -652,5 +736,13 @@ class StreamPortal : AppCompatActivity() {
 
         /** Renderer recoveries per Activity — beyond this we go offline. */
         private const val MAX_RENDERER_RECOVERIES = 3
+
+        /** Dim over the empty view while the session's first page resolves. */
+        private const val COVER_SCRIM = 0xB3000000.toInt()
+
+        /** Pause before a queued redirect-loop retry. Long enough to let the
+         *  engine finish unwinding the failed navigation, short enough to be
+         *  invisible. */
+        private const val RETRY_PAUSE_MS = 60L
     }
 }

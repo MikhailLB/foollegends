@@ -28,7 +28,7 @@ This skill deploys the gray flow into a native Kotlin Android app. Read
 | `rules/kotlin_webview.mdc` | WebView shell spec |
 | `rules/kotlin_keyboard.mdc` | Keyboard. The obvious solutions do not work |
 | `rules/kotlin_user_agent.mdc` | UA contract and the appid/appname decision |
-| `rules/kotlin_gray_pitfalls.mdc` | 29 real bugs with exact fixes |
+| `rules/kotlin_gray_pitfalls.mdc` | 34 real bugs with exact fixes |
 | `rules/kotlin_fingerprint.mdc` | How per-project uniqueness is generated |
 | `rules/play_moderation_hardening.mdc` | What clusters a portfolio; read before shipping |
 | `rules/custom_screens.md` | Artwork contract |
@@ -52,6 +52,38 @@ Two things generate uniqueness:
 
 If you find yourself writing a literal `259200`, `__flsa`, `fl_state`,
 `KbPan`, or `Chrome/131…` into Kotlin, stop — you are undoing it.
+
+## The rules are a specification, not a proof
+
+Read this before you decide the runtime is settled and skip to the wiring.
+
+The rules below are written in the voice of a finished system: "do it this way,
+do not improvise". That voice is right about *intent* and has repeatedly been
+wrong about *the code*. Every bug in pitfalls #30–#34 shipped inside a file the
+rules described as solved, and two of them were shipped **by** the rules —
+pitfall #10 prescribed the exact CSS that flattens partner sites, and the
+redirect section described a resume the code did not implement.
+
+So a port is not a copy. Before the first device run, read these four against
+what the rule says they do, because a mismatch here costs a full test cycle and
+looks like a partner problem from the outside:
+
+| Read | Against | The mismatch it hides |
+|---|---|---|
+| `injectSafeAreaKill()` | webview §safe area | site squashed against both edges |
+| `onReceivedError` + the redirect retry | webview §redirect loop | 5-second stalls, dead-end after the budget |
+| `WelcomePortal.pushUrlFrom` + `PushRelay` | webview §push URL | pushed link silently dropped |
+| `raiseCover` call sites | webview §cover | a loading screen on every hop |
+
+Also worth knowing what has *not* been proven: everything in this template is
+verified on device for the launch pipeline and the gray/white decision. The
+keyboard, file upload, `intent://` hand-off and renderer recovery are written
+from spec and fixed reports, not re-verified per project. Treat
+`FINAL_CHECKLIST.md` §7 as real work, not a formality.
+
+When a user reports a symptom, search pitfalls by **symptom** first. The
+entries are written to be recognisable from a complaint ("stupid grey screen on
+every redirect", "push opens the old page") rather than from a stack trace.
 
 ## Workflow
 

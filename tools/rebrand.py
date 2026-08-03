@@ -220,7 +220,10 @@ def collect_targets() -> list:
         "app/build.gradle.kts",
         "app/proguard-rules.pro",
         "app/src/main/AndroidManifest.xml",
-        "app/src/main/res/values/strings.xml",
+        # All of values/, not just strings.xml: theme names embed class tokens
+        # ("Theme.App.Fullscreen"), and renaming them in the manifest while
+        # leaving themes.xml alone breaks the resource link.
+        "app/src/main/res/values*/*.xml",
         "app/src/main/res/xml/*.xml",
         "app/src/main/res/drawable*/**/*.xml",
         "app/src/main/java/**/*.kt",
@@ -255,6 +258,16 @@ def rewrite_source(text: str, plan: dict) -> str:
         text = re.sub(
             rf"{re.escape(new_root)}\.{re.escape(old_pkg)}\b",
             f"{new_root}.{new_pkg}",
+            text,
+        )
+        # The manifest names components relative to the namespace
+        # (android:name=".startup.WelcomePortal"), which the fully-qualified
+        # pattern above never sees. Left alone, every gray component points at
+        # a package that no longer exists and the app dies on launch with a
+        # ClassNotFoundException.
+        text = re.sub(
+            rf'(android:name=")\.{re.escape(old_pkg)}\.',
+            rf"\g<1>.{new_pkg}.",
             text,
         )
     old_dp = plan["drawables_prefix"]["old"]

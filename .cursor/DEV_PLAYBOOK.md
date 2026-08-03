@@ -88,6 +88,11 @@ comes out unsigned, `keystore.properties` is missing or mispathed.
 
 ## Stage 3 — The native (white) part
 
+Two ways round, and **the second one is the common case**. Read 3b before
+assuming 3a.
+
+### 3a. The game is written into this repo
+
 Replace `NativeContentActivity` with the real game.
 
 - Keep it a normal Activity (or the engine's host Activity).
@@ -101,6 +106,74 @@ Replace `NativeContentActivity` with the real game.
 **Self-verify:** launch the game directly (`adb shell am start -n
 <pkg>/.<GameActivity>`), play it for a minute, rotate it. It has to stand on
 its own as a product.
+
+### 3b. The game already exists — port the gray part into *its* repo
+
+Usually the game is built first, in its own repository, and the gray part is
+brought to it. Do it in that direction: copy the gray flow into the game's
+repo, not the game into this one. The game is the larger, more fragile half and
+it already builds.
+
+**Do this before running `rebrand.py`, in this order.** The renamer does a
+textual pass over every `.kt` in `app/src/main/java`, including the game's, so
+anything the game shares a name with gets rewritten out from under it.
+
+1. **Rename the game's colliding classes.** `Fullscreen` and `LoadingView` are
+   the usual pair — most games have both, and both are in the renamer's class
+   map. Give the game's versions game-specific names first. Check the rest of
+   the map (`CURRENT["classes"]` in `tools/rebrand.py`) against the game's file
+   list; a collision that survives leaves `class X` renamed inside a file still
+   called `X.kt`.
+
+2. **Copy the gray part in.** Root `build.gradle.kts` (needs the
+   `google-services` plugin), `gradle.properties`, `.gitignore`,
+   `gray.properties.example`, `tools/rebrand.py`, `keystore/`, `.cursor/`, and
+   on the app side `build.gradle.kts` (the whole fingerprint engine),
+   `proguard-rules.pro`, `java/com/example/grayshell/**`, `res/xml/**`, the
+   `gray_*` drawables and the notification glyph.
+
+3. **Keep `namespace` equal to the game's package.** This is the one that bites
+   silently: `R` and `BuildConfig` are generated into `namespace`, and the
+   game's sources reference `R` with no import. Point the rebrand at the game's
+   package (`--package com.acme.game`, or just let it read `gray.bundleId`) so
+   the gray classes land in sub-packages beside the game and everything
+   resolves. Giving the gray code a namespace of its own means editing an
+   `import ….R` into every game file.
+
+4. **Merge the manifest, do not overwrite it.** Take the gray `<application>`
+   wholesale — `AppEntry`, the four permissions, the Firebase meta-data, the
+   backup rules, the network config — put the router's `LAUNCHER` filter on
+   `WelcomePortal`, and **strip the launcher filter off the game's entry
+   activity**. Keep the game's activities with their own themes, named
+   fully-qualified so the sub-package renaming cannot touch them.
+
+5. **Route `goNative()` at the game.** Delete `NativeContentActivity` rather
+   than keeping it as a shim, point `WelcomePortal.goNative()` at the game's
+   entry Activity, and drop the stub from `proguard-rules.pro` — adding
+   `-keep` lines for the game's Activities, which R8 otherwise cannot prove are
+   live.
+
+6. **Merge `res/values/`.** Theme names from both halves coexist fine; both get
+   renamed by the rebrand together (pitfalls #34).
+
+7. **Use the game's artwork for the gray screens.** `LoadingView`'s background,
+   the no-wifi screen and the permission screen ship as placeholder gradients.
+   A game repo already has a splash image — draw it in all three. The router's
+   splash and the game's splash then being the same frame is the point: the app
+   must not change its face mid-launch.
+
+**Self-verify:**
+
+```powershell
+rg -n 'com\.example\.grayshell' app          # empty
+rg -n 'android:name="\.' app/src/main/AndroidManifest.xml   # every package exists on disk
+gradlew assembleDebug                        # game sources resolve R and BuildConfig
+gradlew assembleRelease                      # R8 keeps the game's Activities
+```
+
+Then launch the game's entry Activity directly, as in 3a. Bumping
+`gray.versionCode` above whatever the game already shipped is easy to forget —
+`adb install` refuses the downgrade and that is usually how you find out.
 
 ---
 

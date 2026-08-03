@@ -192,18 +192,32 @@ override fun onNewIntent(i: Intent) {
 
 ---
 
-## 10. Safe-area CSS kill breaks site button styling
+## 10. Safe-area CSS kill flattens the site against both edges
 
-**Symptom:** Site buttons become thin/squashed after injecting safe-area CSS.
+**Symptom:** the page has no side gutters. Columns and cards touch the screen
+edge, buttons look thin and squashed. Worst on the partner's own test site,
+because that is the one laid out with `padding` on `body` / `#app`.
 
-**Cause:** a universal `*{padding-top:0!important;padding-bottom:0!important}`
-selector strips padding from every element.
+**Cause:** the injection zeroing the page's box model instead of the safe-area
+variables. Two generations of this bug:
 
-**Fix:** target ONLY root containers + safe-area CSS vars, never `*`:
+- `*{padding-top:0!important;padding-bottom:0!important}` — strips padding from
+  every element on the page.
+- The "fixed" version, which is just as destructive:
+  `html,body,#__nuxt,#app,#root{padding-left:0!important;padding-right:0!important;margin-top:0!important}`.
+  Named selectors instead of `*`, but those are precisely the elements sites
+  build their gutters on.
+
+**The rule is about which properties, not which selectors.** The window already
+pads for the cutout in `applyInsets()`. All the CSS has to do is stop the page
+adding a *second* inset of its own through `env(safe-area-inset-*)`.
+
+**Fix:** zero the variables, and nothing else. `padding-left`, `padding-right`
+and `margin` are never touched anywhere. `padding-top` only on chrome wrappers
+that are known to add a status-bar offset:
 ```css
 :root{--safe-area-inset-top:0px!important; --sat:0px!important; /* ...all vars */}
-html,body,#__nuxt,#__layout,#app,#root{padding-top:0!important;
-  padding-left:0!important;padding-right:0!important;margin-top:0!important;}
+.gameview-mobile-header,.app-header{padding-top:0!important;}
 ```
 Re-apply on `pushState`/`replaceState`/`popstate` and a 2500ms interval.
 
@@ -390,9 +404,10 @@ only then shows the destination.
 **Cause:** a "freeze-frame" built with `view.draw(canvas)` to hide the hops. A
 hardware-accelerated WebView draws **black** into a software canvas.
 
-**Fix:** never snapshot the view. Cover the live page with a scrim + spinner
-instead, and drop it a beat after the load finishes so consecutive hops don't
-make it blink (`kotlin_webview.mdc`).
+**Fix:** never snapshot the view. There is nothing to hide a redirect hop
+behind that is better than the page the user is already reading — leave it on
+screen and let the destination replace it. See #33 for why covering the hops
+was the wrong answer to this in the first place.
 
 ---
 
@@ -406,10 +421,10 @@ committed. That handler reset the retry counter and recorded the error URL as
 settled, and it also dropped the cover while a reload was queued.
 
 **Fix:** a `loadFailed` flag set in `onReceivedError` and cleared in
-`onPageStarted` (skip the whole `onPageFinished` body when set), and a
-`retryPending` flag that keeps the cover up across the reload. Resume at the
-deepest hop seen, not at the original URL, and allow ~6 attempts with a ~60 ms
-pause.
+`onPageStarted`, and skip the whole `onPageFinished` body when it is set.
+
+That is only half of a working retry — see #30 for the other half, which is
+*where* the retry resumes from and *how* it is issued.
 
 ---
 
@@ -474,7 +489,130 @@ adb logcat -c; adb logcat -s <Router>:V <Tracker>:V <ConfigClient>:V <Offline>:V
 
 ---
 
-## 29. Misc
+## 30. Redirect retry restarts the chain instead of resuming it
+
+**Symptom:** `ERR_TOO_MANY_REDIRECTS` fires two or three times in a row on the
+same host and the page takes five seconds to appear. In the log:
+`redirect loop, resuming attempt 1` … `attempt 2` … each ~2 s apart.
+
+**Cause — two independent bugs that look like one:**
+
+- The resume URL. The retry reloaded `lastMainFrameUrl`, but `onPageFinished`
+  overwrites that field with the page that **settled**, so by the time the
+  error fires it names the chain's entry point. Reloading it walks the same
+  hops into the same loop and burns the budget for nothing. The hop trail needs
+  its own field (`deepestHop`), written from both `shouldOverrideUrlLoading`
+  and `onPageStarted` — `shouldOverrideUrlLoading` does not see every
+  server-side 30x.
+- The re-entrant load. `view.loadUrl()` called from inside `onReceivedError`
+  reaches an engine still unwinding the failed navigation, which defers it.
+  That deferral is the ~2 s between attempts. Post it instead:
+  `view.postDelayed({ view.loadUrl(resumeAt) }, 60L)`.
+
+**Fix:** resume from the deepest hop, post the load, and give the exhausted
+budget somewhere to go — see #31.
+
+---
+
+## 31. Exhausted redirect budget is a dead end
+
+**Symptom:** after the last retry the app just sits there. If a cover was
+raised it stays until its own 20-second timeout; if not, the user is left
+looking at Chromium's error page.
+
+**Cause:** `ERR_TOO_MANY_REDIRECTS` (`-9`) is not in the network-error set
+`{-2,-6,-7,-8,-11}`, so once `redirectRetries` hit the maximum, control fell
+through `onReceivedError` and **nothing at all happened**. No offline screen,
+no reload, no cover drop.
+
+**Fix:** make the exhausted path explicit. Try the URL the config endpoint
+named once — the chain is stuck but its entry point usually still resolves, and
+the cookies picked up along the way are often what it was missing — and if that
+fails too, drop the cover and hand the page back. Never leave a branch of
+`onReceivedError` that does nothing.
+
+---
+
+## 32. Push URL is dropped when the app is in the background
+
+**Symptom:** tapping a notification opens the WebView on the **previously
+saved** page rather than the pushed link. Works when the app is in the
+foreground, fails when it is backgrounded or killed — which is every real case.
+
+**Cause:** the message carries a `notification` block. Firebase then draws the
+notification itself whenever the app is not in the foreground, and
+`PushRelay.onMessageReceived` is **never called** — so the intent the tap opens
+is the plain launcher intent, carrying the `data` payload as raw string extras
+(`url`, `link`). `WelcomePortal` read only its own extras, gated on a
+`from_push` boolean that this intent does not have, so the URL vanished.
+
+**Fix:** one resolver that accepts both shapes, used by `onCreate` **and**
+`onNewIntent`:
+```kotlin
+val own = if (intent.getBooleanExtra(EXTRA_FROM_PUSH, false))
+    intent.getStringExtra(EXTRA_PUSH_URL) else null
+val raw = intent.getStringExtra("url") ?: intent.getStringExtra("link")
+return (own ?: raw)?.trim()?.takeIf { it.isNotBlank() && UrlGuard.accepts(it) }
+```
+The NATIVE lock still applies after it, unchanged.
+
+If the backend puts the link only inside the `notification` block rather than
+in `data`, there is nothing to read — that is a backend fix, not an app one.
+
+---
+
+## 33. The loading cover is shown for things that do not need it
+
+**Symptom:** the user reports "a stupid grey/black screen on every redirect".
+They are right.
+
+**Cause:** raising the cover in `onPageStarted` for *every* navigation. The
+original intent — "the user only ever sees a finished page" — sounds correct
+and is wrong in practice: the page they were already reading is a better thing
+to look at than a scrim, and an affiliate chain fires several navigations per
+click.
+
+**Fix:** the cover earns its place in exactly one situation — the session's
+first page, where the only thing underneath is an empty view. Gate it on a
+`firstPageSettled` flag set in `onPageFinished`. Redirects, in-page navigation
+and retries all resolve behind the live page.
+
+**Trade-off to state out loud:** without a cover on the retry path, a redirect
+loop can leave Chromium's error page visible between hops. With the posted
+60 ms retry the window is normally too short to paint, but it is not zero. Do
+not "solve" this by bringing the cover back — that is the bug this entry
+describes.
+
+---
+
+## 34. rebrand.py leaves the manifest pointing at dead packages
+
+**Symptom:** the rebrand reports success, the build passes, and the app dies on
+launch with `ClassNotFoundException` on the launcher activity. Or the build
+fails with an unresolved `@style/Theme.App.<something>`.
+
+**Cause:** two blind spots in the renamer, both from matching only
+fully-qualified names:
+
+- The manifest names components **relative** to the namespace
+  (`android:name=".startup.WelcomePortal"`). The sub-package pattern is
+  anchored on the package root, so it never matched, and every gray component
+  kept a package that no longer exists.
+- `collect_targets()` listed `res/values/strings.xml` but not `themes.xml`.
+  Theme names embed class tokens (`Theme.App.Fullscreen`), so the manifest
+  reference was renamed and the style definition was not.
+
+**Fix:** both are in `tools/rebrand.py` now — a second `re.sub` for
+`android:name="."` and a `res/values*/*.xml` glob. **Verify after every
+rebrand**, because the failure is silent at build time:
+```powershell
+rg -n 'android:name="\.' app/src/main/AndroidManifest.xml   # packages must exist on disk
+gradlew assembleDebug
+```
+
+---
+
+## 35. Misc
 
 - `Locale` import: use `java.util.Locale`, not `android.os.Locale`.
 - `intArrayOf<Int>()` is invalid — write `intArrayOf()`.

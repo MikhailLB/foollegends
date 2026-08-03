@@ -62,8 +62,21 @@ return "$base appid/$bundleId appname/$appNameToken"
   - **portrait** → top inset (status bar + top notch),
   - **landscape** → left + right insets (side cameras).
 - Re-apply on `onConfigurationChanged` and after lock/unlock.
-- The CSS safe-area kill in the page is SEPARATE and must NOT use `*` selectors
-  (see pitfalls #10) — only `:root` vars + named root containers.
+
+The CSS injection in the page is a **separate** mechanism with a much narrower
+job than it looks. The native padding above already handles the cutout; all the
+CSS has to do is stop the page adding a *second* inset of its own through
+`env(safe-area-inset-*)`. So it zeroes the safe-area custom properties on
+`:root` — and touches nothing else.
+
+**The constraint is on properties, not on selectors.** `padding-left`,
+`padding-right` and `margin` must never be written, on any selector: those are
+what sites build their gutters with, and zeroing them on `html`/`body`/`#app`
+flattens the whole layout against both screen edges. `padding-top` is allowed
+only on chrome wrappers that add a status-bar offset of their own
+(`.app-header`, `.gameview-mobile-header`). Read pitfalls #10 before editing
+this — the earlier "fix" for it named the wrong culprit and shipped the bug for
+two generations.
 
 ---
 
@@ -89,16 +102,22 @@ Two different mechanisms, never mixed up:
   shown by the router, filled to 100% before anything replaces it. It must
   never reappear: not after the notification-permission screen, not for a push
   URL on a live shell, not between redirect hops.
-- **The cover** belongs to the WebView. It is a scrim over the current page
-  (dimmed for an ordinary navigation, opaque after a failed load) with a small
-  spinner, raised in `onPageStarted` and dropped a beat after `onPageFinished`.
-  That beat matters: a redirect hop finishes and starts the next load within a
-  frame or two, and without the linger the cover blinks off and on between
-  them.
+- **The cover** belongs to the WebView, and it covers **one** thing: the
+  session's first page, where all that sits underneath is an empty view. A
+  scrim plus a small spinner, raised in `onPageStarted` while
+  `firstPageSettled` is false, dropped a beat after `onPageFinished`.
+
+Everything else navigates uncovered. A redirect hop, an in-page navigation, a
+retry — the page the user is already reading stays on screen until the next one
+commits, which is both what a browser does and what the user asked for the
+first time they saw a scrim flash on every hop (pitfalls #33). Covering hops
+looks like polish and reads as the app freezing.
 
 Back the cover with a timeout so a page that never reports back cannot hold the
 screen for good, and drop it on the paths that never produce a finished page —
-a load that turns into a download, an unsupported scheme handed to the system.
+a load that turns into a download, an unsupported scheme handed to the system,
+a load that failed with no retry left. **No branch of `onReceivedError` may end
+without either navigating somewhere or dropping the cover** (pitfalls #31).
 
 **Never snapshot the WebView to build a freeze-frame.** `view.draw(canvas)` on
 a hardware-accelerated WebView yields a black bitmap, which is exactly the
@@ -109,22 +128,39 @@ costs nothing and cannot be black.
 
 ## Redirect loop (ERR_TOO_MANY_REDIRECTS)
 
-Chromium gives up after 20 hops; affiliate chains are routinely longer. Track
-the last main-frame URL in `shouldOverrideUrlLoading` and, on a main-frame
-`onReceivedError` with `ERROR_REDIRECT_LOOP` / `ERROR_TOO_MANY_REDIRECTS` (or a
-description containing `too_many`), reload **the deepest hop seen** — not the
-original URL — so the chain resumes instead of restarting. Up to 6 attempts,
-with only a ~60 ms pause: this is dead time in the middle of a navigation.
+Chromium gives up after 20 hops; affiliate chains are routinely longer, so this
+is an ordinary condition to resume from, not a failure to report.
 
-Two flags make the retry actually work, and both were bugs before they were
-flags:
+**Keep two separate URL fields.** They are not interchangeable and conflating
+them is pitfalls #30:
+
+| Field | Written by | Read by |
+|---|---|---|
+| `deepestHop` | `shouldOverrideUrlLoading` (main frame) **and** `onPageStarted` | the redirect retry |
+| `lastMainFrameUrl` | `onPageFinished` only | renderer recovery, offline return URL |
+
+The retry resumes from `deepestHop`. Resuming from the last *settled* page
+restarts the chain into the same loop and spends the budget on nothing. Both
+write sites matter: `shouldOverrideUrlLoading` does not see every server-side
+30x, and `onPageStarted` gives the URL the engine actually committed to.
+
+**Post the retry, never call `loadUrl` from inside the callback.** The engine
+is still unwinding the failed navigation and defers a re-entrant load by
+seconds — which then looks like a slow partner rather than a bug in the shell.
+`view.postDelayed({ view.loadUrl(resumeAt) }, 60L)`.
+
+**Give the exhausted budget somewhere to go.** `-9` is not a network error, so
+falling through does nothing at all (pitfalls #31). Retry the configured entry
+point once, then drop the cover and hand the page back.
+
+Two flags make the retry work, and both were bugs before they were flags:
 
 - `loadFailed`, set in `onReceivedError` and cleared in `onPageStarted`. A
   failed load still reaches `onPageFinished`, with the error page committed. If
   that path resets the retry counter and records the URL as settled, the budget
   never runs down and the error page is handed to the user.
-- `retryPending`, set while a reload is queued. The cover must not drop in that
-  gap, or the native error page flashes.
+- `retryPending`, set while a reload is queued, so nothing treats the gap as a
+  settled page.
 
 ---
 
@@ -212,6 +248,29 @@ route through this.
 ---
 
 ## Push URL into the WebView (one-time)
+
+### Two delivery shapes, and only one of them reaches your service
+
+This is the single most-missed thing in the push path (pitfalls #32). Which
+code runs on a notification tap depends on the **payload**, not on your code:
+
+| Payload | App foregrounded | App backgrounded or killed |
+|---|---|---|
+| `data` only | `PushRelay.onMessageReceived` | `PushRelay.onMessageReceived` |
+| contains `notification` | `PushRelay.onMessageReceived` | **Firebase draws it. Your service never runs.** |
+
+In the bottom-right cell the tap opens the plain launcher intent, and the
+`data` payload arrives as raw string extras — `url`, `link` — with none of your
+own extras and no `from_push` flag. A router that reads only its own extras
+drops the link silently and reopens the shell on the saved page, which looks
+exactly like "push URLs don't work" while foreground tests pass.
+
+So the router resolves a push URL from **both** shapes, in `onCreate` and in
+`onNewIntent`. The NATIVE lock and `UrlGuard` apply after the resolver,
+unchanged. Agree the payload shape with whoever sends the pushes: a link that
+lives only inside the `notification` block cannot be read at all.
+
+### The rest of the contract
 
 - `PushBus.onWarmUrl` is set in `StreamPortal.onStart`, cleared in
   `onStop`/`onDestroy`.

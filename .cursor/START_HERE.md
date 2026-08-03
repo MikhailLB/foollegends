@@ -74,14 +74,20 @@ app\build\outputs\apk\debug\app-debug.apk` deploys.
 
 | Question | File |
 |---|---|
+| Where is anything? (fast lookup) | `.cursor/rules/AGENT.md` |
+| Building a new project, stage by stage | `.cursor/DEV_PLAYBOOK.md` |
+| Ship gate — device QA before upload | `.cursor/FINAL_CHECKLIST.md` |
 | How is the fingerprint derived? | `app/build.gradle.kts` (the top half — read it) |
 | What values are per-project? | `gray.properties.example` (each key documented inline) |
+| Per-project uniqueness rules | `.cursor/rules/kotlin_fingerprint.mdc` |
+| What clusters a portfolio in Play | `.cursor/rules/play_moderation_hardening.mdc` |
+| Architecture + config contract | `.cursor/rules/kotlin_gray_guide.mdc` |
 | The launch state machine | `.cursor/rules/kotlin_launch_flow.mdc` + `startup/WelcomePortal.kt` |
 | WebView shell contract | `.cursor/rules/kotlin_webview.mdc` + `portal/StreamPortal.kt` |
 | Keyboard | `.cursor/rules/kotlin_keyboard.mdc` + `portal/KeyboardPan.kt` |
-| Real bugs + fixes | `.cursor/rules/kotlin_gray_pitfalls.mdc` |
-| Per-project uniqueness rules | `.cursor/rules/kotlin_fingerprint.mdc` |
-| Ship checklist | `.cursor/FINAL_CHECKLIST.md` |
+| User-Agent + appid/appname decision | `.cursor/rules/kotlin_user_agent.mdc` |
+| Real bugs + fixes (29 entries) | `.cursor/rules/kotlin_gray_pitfalls.mdc` |
+| Screen artwork contract | `.cursor/rules/custom_screens.md` |
 
 ## 5. Invariants — things that must never break
 
@@ -148,14 +154,19 @@ foollegends/
 │       │   ├── LoadingView · Fullscreen · NativeContentActivity
 │       └── res/               drawable* · mipmap* · values · xml
 └── .cursor/
-    ├── START_HERE.md          (this file)
-    ├── FINAL_CHECKLIST.md
+    ├── START_HERE.md              (this file — entry point)
+    ├── DEV_PLAYBOOK.md            (stage-by-stage build process)
+    ├── FINAL_CHECKLIST.md         (device QA before every upload)
     ├── rules/
-    │   ├── kotlin_gray_guide.mdc
-    │   ├── kotlin_launch_flow.mdc
-    │   ├── kotlin_webview.mdc
-    │   ├── kotlin_keyboard.mdc
-    │   ├── kotlin_gray_pitfalls.mdc
-    │   └── kotlin_fingerprint.mdc
+    │   ├── AGENT.md                       (compressed file map)
+    │   ├── kotlin_gray_guide.mdc          (architecture, config contract)
+    │   ├── kotlin_launch_flow.mdc         (attribution contract)
+    │   ├── kotlin_webview.mdc             (shell spec)
+    │   ├── kotlin_keyboard.mdc            (pan, not resize)
+    │   ├── kotlin_user_agent.mdc          (UA contract)
+    │   ├── kotlin_gray_pitfalls.mdc       (29 real bugs + fixes)
+    │   ├── kotlin_fingerprint.mdc         (how uniqueness is generated)
+    │   ├── play_moderation_hardening.mdc  (what clusters a portfolio)
+    │   └── custom_screens.md              (artwork contract)
     └── skills/gray-part-kotlin/SKILL.md
 ```

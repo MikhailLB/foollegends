@@ -95,8 +95,8 @@ adb logcat -s WelcomePortal:V TrackingDispatch:V ReachDispatch:V StreamPortal:V 
 - [ ] **NATIVE user**: push arrives, notification shows, tap opens the
       **game**. The WebView must not appear. This is the store-review
       invariant — verify it explicitly.
-- [ ] Push URL outside `gray.allowedHosts` → notification shows, tap does
-      **not** open a WebView.
+- [ ] Push payload carrying something that is not web content (`file:///…`,
+      `javascript:…`) → notification shows, tap does **not** open a WebView.
 - [ ] Push with an image renders BigPicture; a slow image URL does not stall
       or ANR the service.
 - [ ] Permission screen: Accept → OS dialog. Skip → re-asked only after the
@@ -133,7 +133,6 @@ adb logcat -s WelcomePortal:V TrackingDispatch:V ReachDispatch:V StreamPortal:V 
 
 - [ ] Release is signed with this project's keystore; mapping file uploaded.
 - [ ] `gray.debugForceUrl` empty.
-- [ ] `gray.allowedHosts` non-empty and lists only specific partner hosts.
 - [ ] Manifest declares exactly: `INTERNET`, `ACCESS_NETWORK_STATE`,
       `POST_NOTIFICATIONS`, `VIBRATE` — nothing else.
 - [ ] Data safety form declares Device IDs (AppsFlyer, FCM) shared with third

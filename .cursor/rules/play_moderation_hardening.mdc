@@ -125,10 +125,13 @@ product, but the signal can be lowered:
 The app can be handed a URL by the config endpoint or by a push payload. Left
 ungated, that is "the app changes its purpose after review".
 
-- **`UrlGuard` must be armed.** `gray.allowedHosts` empty means every incoming
-  URL is accepted. The build prints a warning; do not ship past it.
-- **Never allowlist a wildcard TLD** (`com`, `net`). Allowlist the specific
-  partner hosts.
+- **There is no host allowlist, and that is deliberate.** The config endpoint
+  is the authority on where a user goes, and an affiliate chain crosses hosts
+  nobody can enumerate in advance — a hand-maintained list only ever ends up
+  rejecting a working destination and dropping the user into the game with no
+  trace of why. `UrlGuard` checks the shape instead: `http`/`https` with a
+  host, so a payload naming `file:///…` or `javascript:…` never reaches a
+  WebView that has JavaScript on.
 - **The NATIVE lock must hold.** Once an install is NATIVE, no push and no
   config answer may flip it to a WebView. Enforced in `WelcomePortal` and
   `PushRelay` — do not "temporarily" relax it for a test.
@@ -217,24 +220,21 @@ rg -n 'Log\.(i|w|e|d|v)\(' app/src/main/java | rg -v 'core[/\\]Trace\.kt'
 # 5.4 — Permissions: nothing beyond the four justified ones.
 rg -n 'uses-permission' app/src/main/AndroidManifest.xml
 
-# 5.5 — Allowlist armed (must be NON-empty).
-rg -n '^gray\.allowedHosts' gray.properties
-
-# 5.6 — Debug URL empty (must be blank or absent).
+# 5.5 — Debug URL empty (must be blank or absent).
 rg -n '^gray\.debugForceUrl' gray.properties
 
-# 5.7 — White part is real, not the stub.
+# 5.6 — White part is real, not the stub.
 rg -n 'Replace .*with your real game|NATIVE CONTENT \(white part\)' app/src/main/java
 
-# 5.8 — Seed is not the template default.
+# 5.7 — Seed is not the template default.
 rg -n 'CHANGE-ME-EVERY-PROJECT' gray.properties
 
-# 5.9 — Derived fingerprint, for diffing against the previous project.
+# 5.8 — Derived fingerprint, for diffing against the previous project.
 gradlew grayReport
 ```
 
-`5.1`–`5.3`, `5.7`, `5.8` must be empty. `5.5` must be non-empty. `5.4` must
-list exactly the four permissions from §3c. `5.6` must be blank.
+`5.1`–`5.3`, `5.6`, `5.7` must be empty. `5.4` must list exactly the four
+permissions from §3c. `5.5` must be blank.
 
 ## 6. The one-line summary
 

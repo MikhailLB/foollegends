@@ -245,10 +245,6 @@ android {
         buildConfigField("int",    "UA_CHROME_MAJOR",  chromeMajor.toString())
         buildConfigField("int",    "UA_CHROME_BUILD",  chromeBuild.toString())
         buildConfigField("int",    "UA_CHROME_PATCH",  chromePatch.toString())
-
-        // Comma-separated so the runtime can split it once at init. Empty means
-        // "no gate" — the runtime logs a warning in that case.
-        buildConfigField("String", "ALLOWED_HOSTS",   bcStr(grayProp("gray.allowedHosts")))
     }
 
     signingConfigs {

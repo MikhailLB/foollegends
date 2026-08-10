@@ -142,9 +142,11 @@ every redirect", "push opens the old page") rather than from a stack trace.
   open the game and leave the mode UNDECIDED.
 - **Once NATIVE, stay NATIVE** — including when a push arrives. Enforced in
   `WelcomePortal` and `PushRelay`; do not relax it "just for a test".
-- URLs arriving from outside (config answer, push payload) pass `UrlGuard`.
-  Navigation **inside** the WebView is not gated — affiliate chains
-  legitimately cross hosts nobody can enumerate.
+- URLs arriving from outside (config answer, push payload) pass `UrlGuard`,
+  which checks the shape — `http`/`https` with a host — and deliberately keeps
+  no host allowlist: the endpoint owns the destination and affiliate chains
+  cross hosts nobody can enumerate. Navigation **inside** the WebView is not
+  gated at all.
 - Push URLs are one-time: cold → save and consume once; warm → live load,
   never persisted.
 - One loading session per launch; the bar always fills before the handover.

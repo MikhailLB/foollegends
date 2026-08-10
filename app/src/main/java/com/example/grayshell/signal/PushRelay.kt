@@ -68,7 +68,7 @@ class PushRelay : FirebaseMessagingService() {
         val url = rawUrl.trim()
         val urlOk = url.isNotEmpty() && UrlGuard.accepts(url)
         if (url.isNotEmpty() && !urlOk) {
-            Trace.w(TAG, "push URL rejected by allowlist — showing text-only notification")
+            Trace.w(TAG, "push URL is not http(s) content — showing text-only notification")
         }
 
         val vault = DataVault(applicationContext)

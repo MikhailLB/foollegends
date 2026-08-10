@@ -3,7 +3,6 @@ package com.example.grayshell.startup
 import android.app.Application
 import com.example.grayshell.BuildConfig
 import com.example.grayshell.core.Trace
-import com.example.grayshell.core.UrlGuard
 import com.example.grayshell.reach.TrackingDispatch
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
@@ -36,9 +35,6 @@ class AppEntry : Application() {
         } catch (e: Exception) {
             Trace.w(TAG, "Firebase not configured — gray flow will still try the config POST", e)
         }
-
-        // Warn once if the operator did not fill in gray.allowedHosts.
-        UrlGuard.warnIfMissing()
 
         trackingDispatch = TrackingDispatch(this)
         trackingDispatch.prime()

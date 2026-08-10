@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit
  * Config endpoint client. One responsibility, one method: POST the attribution
  * body and return the parsed answer.
  *
- * The URL out of a successful response is checked against [UrlGuard] before it
- * is handed back. A destination outside the allowlist is treated the same as
+ * The URL out of a successful response passes [UrlGuard] before it is handed
+ * back. A destination that is not web content is treated the same as
  * `ok:false` — the app opens the native part, and the mode is not persisted
  * (the endpoint did answer, but its answer was rejected by our own gate, so
  * the "did the server rule on this install" question is still open next launch).
@@ -72,7 +72,7 @@ class ReachDispatch {
             val exp = j.optLong("expires", 0L)
             if (ok && url.isNotBlank()) {
                 if (!UrlGuard.accepts(url)) {
-                    Trace.w(TAG, "endpoint URL rejected by allowlist")
+                    Trace.w(TAG, "endpoint URL is not http(s) content — ignoring it")
                     return ChannelResult.native()
                 }
                 ChannelResult.stream(url, exp)

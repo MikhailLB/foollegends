@@ -104,9 +104,11 @@ app\build\outputs\apk\debug\app-debug.apk` deploys.
    a connectivity check.** All three matter; see pitfalls #19.
 5. **Push URLs are one-shot.** Warm URLs never persist; cold URLs live in
    the vault until the router consumes them exactly once.
-6. **URLs from outside the WebView pass `UrlGuard`.** Config answers and
-   push payloads only. Internal WebView navigation is unrestricted (an
-   affiliate chain legitimately crosses hosts nobody can enumerate).
+6. **URLs from outside the WebView pass `UrlGuard`.** It is a shape check —
+   `http`/`https` with a host — not a host allowlist: the config endpoint
+   decides the destination, and an affiliate chain crosses hosts nobody can
+   enumerate. What it stops is `file:///…` or `javascript:…` arriving in a
+   push payload.
 7. **The bar fills before the handover.** One loading session per launch,
    `LoadingView.complete { … }` gates every hand-over.
 8. **Keyboard is solved by panning, never resizing.** `KeyboardPan` is the

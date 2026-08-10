@@ -24,7 +24,6 @@ to Stage 5 ships.
 | AppsFlyer dev key | ★ | Project-specific; do not reuse a sibling's |
 | `google-services.json` | ★ | From a Firebase project used by no other app |
 | Firebase project number | ★ | Sent in the config body as `firebase_project_id` |
-| Partner host allowlist | ★ | Specific hosts for `gray.allowedHosts`; never a bare TLD |
 | OneLink host | | `<app>.onelink.me`; omit if the campaign has none |
 | The native game | ★ | A real, playable, reviewable app. Not a stub |
 | Screen artwork | | 6 images — see `rules/custom_screens.md` |

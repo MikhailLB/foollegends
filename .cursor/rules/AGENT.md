@@ -11,7 +11,7 @@ Fast lookup. For *why* any of it is the way it is, follow the "see" column.
 ## Control flow in ten lines
 
 ```
-AppEntry.onCreate            Firebase + AppCheck, UrlGuard warning,
+AppEntry.onCreate            Firebase + AppCheck,
                              TrackingDispatch.prime()   ← init only, no traffic
    ↓
 WelcomePortal.onCreate       warm-push handoff? → finish
@@ -68,7 +68,7 @@ goGray()/goNative()          handOver { }: the bar fills to 100% first, always
 | File | Role | Do not get wrong | See |
 |---|---|---|---|
 | `Trace.kt` | The only logger | Guarded by `BuildConfig.DEBUG`; a bare `Log.i` elsewhere ships | play_moderation §4 |
-| `UrlGuard.kt` | Host-suffix allowlist | Gates config answers and push payloads only, **not** in-WebView navigation | play_moderation §3b |
+| `UrlGuard.kt` | `http(s)`-with-a-host check | No host allowlist by design. Gates config answers and push payloads only, **not** in-WebView navigation | play_moderation §3b |
 | `UserAgent.kt` | The single UA builder | Every caller reads from here. Version tuple is seeded per project | user_agent |
 
 ### `blueprint/`, root, `wire/`
@@ -85,7 +85,7 @@ goGray()/goNative()          handOver { }: the bar fills to 100% first, always
 
 | File | Role |
 |---|---|
-| `gray.properties` | Gitignored. Seed + identity + credentials + allowlist. The only file an operator edits |
+| `gray.properties` | Gitignored. Seed + identity + credentials. The only file an operator edits |
 | `gray.properties.example` | Documented template |
 | `app/build.gradle.kts` | Fingerprint engine (top half) + `graySeed` / `grayReport` tasks |
 | `tools/rebrand.py` | Renames package, folders, classes, drawable prefix |

@@ -45,27 +45,14 @@ gray.appsFlyerKey    =
 gray.firebaseProject =
 gray.gcdBase         = https://gcdsdk.appsflyer.com/install_data/v4.0/
 
-# ══ 4. URL ALLOWLIST ═════════════════════════════════════════════════════════
-# Host suffixes the app will accept a URL for from the config endpoint or from
-# a push payload. A host matches when it equals an entry or is a subdomain of
-# one. This is the gate on the two places an outsider can hand the shell a URL.
-#
-# It deliberately does NOT gate navigation inside the WebView: an affiliate
-# chain legitimately crosses hosts nobody can enumerate in advance, and gating
-# it would break the product.
-#
-# Empty = accept anything. The build prints a warning; releasing like this is a
-# review risk (an app that will load any URL a server names).
-gray.allowedHosts =
-
-# ══ 5. ONELINK ═══════════════════════════════════════════════════════════════
+# ══ 4. ONELINK ═══════════════════════════════════════════════════════════════
 # AppsFlyer OneLink host for the deep-link intent-filter. Leave the default and
 # gray.oneLinkVerify=false when the app has no OneLink; the filter then exists
 # but matches nothing.
 gray.oneLinkHost   = nolink.invalid
 gray.oneLinkVerify = false
 
-# ══ 6. USER-AGENT ════════════════════════════════════════════════════════════
+# ══ 5. USER-AGENT ════════════════════════════════════════════════════════════
 # The shell presents itself as Chrome on Android. Scaffolding and version
 # fragments are encoded like any other secret, so no sibling app shares the
 # literal.
@@ -76,7 +63,7 @@ gray.oneLinkVerify = false
 gray.uaAppSuffix = false
 gray.uaAppToken  = GrayShell
 
-# ══ 7. DEBUG ═════════════════════════════════════════════════════════════════
+# ══ 6. DEBUG ═════════════════════════════════════════════════════════════════
 # Set to a URL to skip attribution and the backend and open the WebView
 # directly. Ignored in release builds — the constant is compiled out.
 gray.debugForceUrl =

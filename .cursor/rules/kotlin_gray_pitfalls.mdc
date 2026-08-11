@@ -14,8 +14,8 @@ the root cause and the fix. Apply these preventively in new projects.
 ## 1. `.debug` applicationIdSuffix breaks AppsFlyer attribution (CRITICAL)
 
 **Symptom:** App always falls into native/white mode. Backend returns
-`404 {"ok":false,"message":"No data"}`. AppsFlyer GCD returns
-`400 {"error_reason":"App ID is incorrect"}`. Attribution body is empty.
+`404 {"ok":false,"message":"No data"}`. The conversion map comes back organic or
+empty on a click that was certainly paid.
 
 **Cause:** `debug { applicationIdSuffix = ".debug" }` makes the package
 `com.x.app.debug`. AppsFlyer/OneLink and Firebase are registered for the real
@@ -131,13 +131,9 @@ private val attribution = CompletableDeferred<Map<String, Any?>>()
 fun init() {
     val l = object : AppsFlyerConversionListener {
         override fun onConversionDataSuccess(d: MutableMap<String, Any?>) {
-            CoroutineScope(Dispatchers.IO).launch {
-                val data = if ((d["af_status"]?.toString())
-                        .equals("Organic", true)) {
-                    delay(5_000); fetchGcd() ?: d        // false-organic fix
-                } else d
-                if (!attribution.isCompleted) attribution.complete(data)
-            }
+            // Take it as final. `d` already *is* the GCD answer — see
+            // kotlin_launch_flow.mdc §2 before adding a "verification" call.
+            if (!attribution.isCompleted) attribution.complete(d)
         }
         override fun onConversionDataFail(e: String) {
             if (!attribution.isCompleted) attribution.complete(emptyMap())
@@ -326,8 +322,9 @@ body with no attribution, and the backend correctly answers 404.
 
 *Tell:* `conversion={}` logged a couple of milliseconds after the decision
 started.
-*Fix:* connectivity gate before `start`, always. Plus a re-ask and a direct GCD
-call as safety nets.
+*Fix:* connectivity gate before `start`, always, plus a re-ask as a safety net.
+Do not add a manual GCD call as a third net — `install_data/v4.0` rejects a dev
+key outright and the SDK's own callback already carries the GCD answer.
 
 **19b. `init` moved out of the Application.** Fixing 19a by moving the whole
 AppsFlyer setup into the router breaks it differently: the SDK learns the app
@@ -561,27 +558,41 @@ in `data`, there is nothing to read — that is a backend fix, not an app one.
 
 ---
 
-## 33. The loading cover is shown for things that do not need it
+## 33. The cover is drawn around the wrong boundary
 
-**Symptom:** the user reports "a stupid grey/black screen on every redirect".
-They are right.
+Two opposite complaints, one line of code between them. Both are real, and the
+boundary that satisfies both is **the entry chain**, not "the first page" and not
+"every navigation".
 
-**Cause:** raising the cover in `onPageStarted` for *every* navigation. The
-original intent — "the user only ever sees a finished page" — sounds correct
-and is wrong in practice: the page they were already reading is a better thing
-to look at than a scrim, and an affiliate chain fires several navigations per
-click.
+**Complaint A — a scrim on every hop.** Raising the cover in `onPageStarted` for
+*every* navigation. The original intent, "the user only ever sees a finished
+page", sounds correct and is wrong: the page they were already reading is a
+better thing to look at than a scrim, and an affiliate chain fires several
+navigations per click. Covering hops looks like polish and reads as the app
+freezing.
 
-**Fix:** the cover earns its place in exactly one situation — the session's
-first page, where the only thing underneath is an empty view. Gate it on a
-`firstPageSettled` flag set in `onPageFinished`. Redirects, in-page navigation
-and retries all resolve behind the live page.
+**Complaint B — a dark screen with an error, for a second or two, on the way in.**
+Gating the cover on "the session's *first* page has finished" is one hop too
+early. An affiliate chain is several full page loads: hop one settles, the flag
+flips, and every hop after it paints whatever it carries — usually a tracking
+pixel and a broken image on black — before its script moves on. A 70% scrim does
+not hide it either; it dims it into something that reads as an error screen.
 
-**Trade-off to state out loud:** without a cover on the retry path, a redirect
-loop can leave Chromium's error page visible between hops. With the posted
-60 ms retry the window is normally too short to paint, but it is not zero. Do
-not "solve" this by bringing the cover back — that is the bug this entry
-describes.
+**Fix:** cover from the first load until a page **stays**, with the opaque
+loading frame rather than a scrim:
+
+- raise it in `onPageStarted` while `chainSettled` is false;
+- in `onPageFinished`, schedule the drop ~600 ms out instead of immediately —
+  a new `onPageStarted` cancels it, which is what bridges the hops;
+- set `chainSettled` when a drop actually goes through, and when
+  `shouldOverrideUrlLoading` sees `hasGesture()` — a tap proves the user has a
+  readable page in front of them.
+
+**Trade-offs to state out loud:** the destination arrives ~600 ms later than it
+strictly could, and a site that reloads itself in full every second holds the
+cover until its timeout. Both are cheaper than the seconds of error page the
+boundary above them showed. And do not go back to covering every navigation —
+that is complaint A, and it was reported first.
 
 ---
 
@@ -612,7 +623,57 @@ gradlew assembleDebug
 
 ---
 
-## 35. Misc
+## 35. A VPN hides the loss of Wi-Fi from every connectivity check
+
+**Symptom:** Wi-Fi is switched off with a page open in the shell and the
+no-internet screen never appears. The page just stops loading. Reported as "the
+offline screen is broken", which it is not.
+
+**Cause:** the tester had a VPN app running, and `activeNetwork` is per-uid. With
+a tunnel up, the default network for this uid *is* the tunnel, and switching
+Wi-Fi off does not touch it: the VPN's `NetworkAgent` stays CONNECTED and keeps
+`INTERNET` **and** `VALIDATED` with nothing underneath it. `onLost` is never
+delivered for a network that never went away, so neither the default-network
+callback nor a capability check notices anything. Captive portals and a Wi-Fi
+whose upstream died behave the same way, VPN or not; `NET_CAPABILITY_INTERNET`
+means "meant to carry internet traffic", never "does".
+
+**Fix:** the heartbeat has to do what it always claimed to do — probe. The cheap
+capability check stays as the fast path, and every beat that passes it ends in a
+TCP handshake (`hasRealInternet`). Two addresses on two different ports, both
+raw IPs: one blocked port must not read as "the internet is gone", and a
+hostname would need DNS, which is exactly what hangs down a dead tunnel.
+
+Two things go with it, and both are bugs of their own:
+
+- Gate the beat, and `goOffline`, on the activity being **resumed**. Android
+  refuses an activity start from the background, so the offline screen never
+  appeared while the flag saying it had been shown was set anyway.
+- Re-check on `onResume`, since losing the link while the user is in another app
+  is the common case. If the loss had already blanked the WebView and the link
+  came back meanwhile, reload the page instead — a working connection behind a
+  black view is the worse of the two failures.
+
+---
+
+## 36. The loading bar is a hairline in landscape
+
+**Symptom:** the splash bar looks right in portrait and reads as a thin line
+over the artwork in landscape.
+
+**Cause:** it was sized against the view. `barH = h * 0.022f` measures the one
+dimension that collapses when the device turns, so the bar got thinner in
+landscape at the same time as `w * 0.62f` made it much longer, and a fraction of
+`h` for the stroke made the outline vanish with it.
+
+**Fix:** size the bar in dp, cap its length, and derive the thickness from that
+length (`barWidth(w) / 19f`, clamped) so the proportion survives the rotation.
+While there, put a gradient scrim under the footer: over real artwork the bar and
+the caption otherwise sit on whatever the frame happens to show at that height.
+
+---
+
+## 37. Misc
 
 - `Locale` import: use `java.util.Locale`, not `android.os.Locale`.
 - `intArrayOf<Int>()` is invalid — write `intArrayOf()`.

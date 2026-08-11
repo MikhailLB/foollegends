@@ -43,7 +43,6 @@ gray.versionName = 1.0.0
 gray.configEndpoint  =
 gray.appsFlyerKey    =
 gray.firebaseProject =
-gray.gcdBase         = https://gcdsdk.appsflyer.com/install_data/v4.0/
 
 # ══ 4. ONELINK ═══════════════════════════════════════════════════════════════
 # AppsFlyer OneLink host for the deep-link intent-filter. Leave the default and

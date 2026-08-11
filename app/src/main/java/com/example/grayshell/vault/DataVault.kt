@@ -1,7 +1,13 @@
 package com.example.grayshell.vault
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.grayshell.BuildConfig
@@ -116,9 +122,34 @@ class DataVault(ctx: Context) {
         get() = plain.getBoolean(BuildConfig.K_NOTIF_OS_DENIED, false)
         set(v) = plain.edit().putBoolean(BuildConfig.K_NOTIF_OS_DENIED, v).apply()
 
-    fun shouldShowNotifScreen(): Boolean {
-        if (notifGranted) return false
-        if (notifOsDenied) return false
+    /**
+     * Set when the OS permission dialog is actually requested — which a skip
+     * never does. Only after a real request does a refusal become readable.
+     */
+    var notifOsAsked: Boolean
+        get() = plain.getBoolean(BuildConfig.K_NOTIF_ASKED, false)
+        set(v) = plain.edit().putBoolean(BuildConfig.K_NOTIF_ASKED, v).apply()
+
+    /**
+     * The prompt is a door to the OS dialog, so it is only worth showing while
+     * that dialog can still lead somewhere. Asking the OS — and not just the
+     * flags written here — also covers the player who switched notifications off
+     * in system settings, which happens outside the app entirely.
+     *
+     * Needs an Activity because the "asked and refused for good" state is only
+     * readable through [Activity.shouldShowRequestPermissionRationale].
+     */
+    fun shouldShowNotifScreen(activity: Activity): Boolean {
+        if (notifGranted || notifOsDenied) return false
+        if (osGranted(activity)) {
+            notifGranted = true
+            return false
+        }
+        if (osBlocked(activity)) {
+            notifOsDenied = true
+            Trace.i(TAG, "notifications blocked by the OS → prompt withheld")
+            return false
+        }
         val now = System.currentTimeMillis() / 1000
         return now >= notifSkipUntil
     }
@@ -127,6 +158,30 @@ class DataVault(ctx: Context) {
         val now = System.currentTimeMillis() / 1000
         notifSkipUntil = now + BuildConfig.PUSH_SNOOZE_SEC
     }
+
+    /** Only API 33+ has a permission to hold; below it the prompt is a soft ask. */
+    private fun osGranted(ctx: Context): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /**
+     * On API 33+ "refused" reads exactly like "never asked": in both cases the
+     * permission is denied and `shouldShowRequestPermissionRationale` is false.
+     * Only [notifOsAsked] separates them — and it has to be the *OS* ask, not the
+     * prompt being shown, because a skip never opens the system dialog and would
+     * otherwise be taken for a refusal on the next launch.
+     *
+     * Below API 33 there is no permission and notifications start on, so having
+     * them off can only mean the player turned them off.
+     */
+    private fun osBlocked(activity: Activity): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notifOsAsked &&
+                !activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            !NotificationManagerCompat.from(activity).areNotificationsEnabled()
+        }
 
     // ── FCM token ───────────────────────────────────────────────────────────
 

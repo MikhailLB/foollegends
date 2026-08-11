@@ -56,9 +56,9 @@ Do not re-do any of this by hand. `gray.seed` → `app/build.gradle.kts` →
 | JS | safe-area sentinel, keyboard sentinel, JS bridge class name |
 | Push | FCM channel id, channel title |
 | Crypto | codec seed bytes, multiplier, offset, algorithm variant |
-| Timings | push snooze, all attribution/config/GCD timeouts, connectivity grace, safe-area delay, heartbeat, redirect budget |
+| Timings | attribution and config timeouts, connectivity grace, safe-area delay, heartbeat, redirect budget (the push snooze is fixed at 3 days) |
 | Network identity | Chrome major/build/patch in the User-Agent |
-| Secrets | config endpoint, AppsFlyer key, Firebase project number, GCD base — encoded at build time |
+| Secrets | config endpoint, AppsFlyer key, Firebase project number — encoded at build time |
 
 `tools/rebrand.py` covers package name, sub-package folders, class names and
 the drawable prefix.
@@ -113,9 +113,16 @@ product, but the signal can be lowered:
   review. A placeholder Activity with a centered label is an automatic
   Deceptive Behavior finding. `NativeContentActivity` in this template is a
   stub — it **must** be replaced before submission.
-- **Keep the native part reachable from the gray path.** A "Play offline"
-  entry in the WebView shell that navigates to the game removes the
-  "unreachable subtree" signal from a reachability analysis.
+- **Keep the native part reachable.** The router starting the game on a NATIVE
+  verdict is the path that has to survive a reachability analysis; nothing may
+  leave the game as a subtree only a remote flag can enter. (An earlier version
+  of this rule asked for a "Play offline" button on the no-internet screen. It
+  was removed on client request — a button offering the game to a player who
+  came for the site is worse than the signal it lowered.)
+- **Give the native part its Privacy Policy and Support links.** Both URLs are
+  in the store listing already, and review expects them inside the app too — in
+  the menu, opened with `ACTION_VIEW`. A game with no way to reach either reads
+  as a shell that was never meant to be used.
 - **Do not ship large dead weight in the unpicked branch.** If the game bundle
   is more than ~3× the gray shell, either shrink it or move it to Play Asset
   Delivery.

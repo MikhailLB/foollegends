@@ -34,13 +34,11 @@ class AlertPortal : AppCompatActivity() {
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            vault.notifGranted = true
-        } else {
-            val denied = !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
-            if (denied) vault.notifOsDenied = true
-            else vault.snoozeNotifPrompt()
-        }
+        // One refusal in the system dialog is final. The OS would still hand out
+        // a second attempt, but a player who has said no there has answered the
+        // question this screen exists to ask — coming back in three days only
+        // asks it again, and this screen is the part they cannot dismiss.
+        if (granted) vault.notifGranted = true else vault.notifOsDenied = true
         proceed()
     }
 
@@ -106,6 +104,7 @@ class AlertPortal : AppCompatActivity() {
                 vault.notifGranted = true
                 proceed()
             } else {
+                vault.notifOsAsked = true
                 permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         } else {

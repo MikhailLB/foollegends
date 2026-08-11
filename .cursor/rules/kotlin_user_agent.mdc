@@ -12,7 +12,6 @@ alwaysApply: false
 Everything that talks to a server reads from it:
 
 - the config endpoint POST (`ReachDispatch`)
-- the AppsFlyer GCD fallback GET (`TrackingDispatch`)
 - the WebView (`StreamPortal`, via `settings.userAgentString`)
 
 **Why this matters and is not cosmetic.** The previous version of this

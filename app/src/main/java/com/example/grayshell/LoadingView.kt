@@ -43,6 +43,7 @@ class LoadingView(
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
     private val accent = 0xFFF2C14E.toInt() // TODO(you): your brand accent color
+    private val dp = context.resources.displayMetrics.density
 
     private var startTime = 0L
     private var finished = false
@@ -76,15 +77,16 @@ class LoadingView(
         val h = height.toFloat()
 
         drawBackground(canvas, w, h)
+        drawFooterScrim(canvas, w, h)
 
         val elapsed = SystemClock.uptimeMillis() - startTime
 
         // Caption dots — always animating (never frozen).
         val dots = ".".repeat(((elapsed / 400L) % 4L).toInt())
-        textPaint.textSize = h * 0.030f
+        textPaint.textSize = 15f * dp
         textPaint.color = accent
-        textPaint.setShadowLayer(h * 0.006f, 0f, h * 0.003f, Color.BLACK)
-        canvas.drawText("Loading$dots", w / 2f, h * 0.885f, textPaint)
+        textPaint.setShadowLayer(3f * dp, 0f, 1.5f * dp, Color.BLACK)
+        canvas.drawText("Loading$dots", w / 2f, captionBaseline(w, h), textPaint)
         textPaint.clearShadowLayer()
 
         if (indeterminate) {
@@ -130,18 +132,29 @@ class LoadingView(
         canvas.drawText("SPLASH PLACEHOLDER", w / 2f, h * 0.5f, textPaint)
     }
 
+    private fun barWidth(w: Float): Float = minOf(w * 0.62f, 420f * dp)
+
+    /**
+     * Both dimensions are in dp, and the thickness follows the bar's own length.
+     * Sizing either against the view height is the trap: height is the dimension
+     * that collapses in landscape, so the bar came out thinner there exactly
+     * where it also stretched longest, and read as a hairline over the artwork.
+     */
+    private fun barHeight(w: Float): Float =
+        (barWidth(w) / 19f).coerceIn(15f * dp, 26f * dp)
+
     private fun drawLoadingBar(
         canvas: Canvas, w: Float, h: Float, progress: Float,
         shimmer: Boolean, shimmerPhase: Long
     ) {
-        val barW = w * 0.62f
-        val barH = h * 0.022f
+        val barW = barWidth(w)
+        val barH = barHeight(w)
         val x0 = (w - barW) / 2f
-        val y0 = h * 0.915f
+        val y0 = h - BOTTOM_INSET_DP * dp - barH
         val r = barH / 2f
 
         paint.style = Paint.Style.FILL
-        paint.color = 0x88000000.toInt()
+        paint.color = 0xCC000000.toInt()
         canvas.drawRoundRect(x0, y0, x0 + barW, y0 + barH, r, r, paint)
 
         if (progress > 0f) {
@@ -171,13 +184,34 @@ class LoadingView(
         }
 
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = h * 0.0035f
+        paint.strokeWidth = 2f * dp
         paint.color = accent
         canvas.drawRoundRect(x0, y0, x0 + barW, y0 + barH, r, r, paint)
         paint.style = Paint.Style.FILL
     }
 
+    /**
+     * Gradient footer so the bar and the caption read over any artwork. Without
+     * it both sit on whatever the background frame happens to be at that height,
+     * and a bright plate there leaves the bar invisible.
+     */
+    private fun drawFooterScrim(canvas: Canvas, w: Float, h: Float) {
+        val top = h - maxOf(h * 0.20f, 120f * dp)
+        paint.style = Paint.Style.FILL
+        paint.shader = LinearGradient(
+            0f, top, 0f, h, 0x00000000, 0xAA000000.toInt(), Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, top, w, h, paint)
+        paint.shader = null
+    }
+
+    private fun captionBaseline(w: Float, h: Float): Float =
+        h - BOTTOM_INSET_DP * dp - barHeight(w) - 12f * dp
+
     private companion object {
+        /** Gap between the bar and the bottom edge, in dp, in both orientations. */
+        const val BOTTOM_INSET_DP = 44f
+
         /** How long the bar takes to run out once routing is done. */
         const val CLOSE_MS = 280f
 

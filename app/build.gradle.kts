@@ -146,16 +146,20 @@ val fcmChannelTitle = pickOne(listOf(
     "Announcements", "Rewards", "Deals", "News"
 ))
 
+// Out of its group on purpose. The RNG is a sequence, so a draw inserted above
+// renames every key drawn after it, and an already-published app would come back
+// from an update unable to find its own state. New derived values go last.
+val keyNotifAsked = pickToken(4, 8)
+
 // Rotated timings — every value moves out of the "obvious" bucket sibling apps
 // were flagged on. The ranges are the width of "still correct behaviour", so
 // a draw is always shippable.
-val pushSnoozeSeconds   = pick(172_800L..604_800L)   // 2–7 days
-val organicGcdDelayMs   = pick(3_500L..7_500L)
+// Product decision, so not a draw: a skipped prompt comes back in three days.
+val pushSnoozeSeconds   = 3L * 24 * 60 * 60
 val configTimeoutMs     = pick(11_000L..22_000L)
 val attributionFirstMs  = pick(22_000L..38_000L)
 val attributionReturnMs = pick(7_000L..14_000L)
 val deepLinkWaitMs      = pick(3_500L..7_000L)
-val gcdTimeoutMs        = pick(7_500L..14_000L)
 val connectGraceMs      = pick(2_500L..5_000L)
 val safeAreaDelayMs     = pick(500L..1_400L)
 val heartbeatMs         = pick(3_000L..6_500L)
@@ -203,7 +207,6 @@ android {
         buildConfigField("int[]",  "SEC_CFG_ENDPOINT",  encodedArrayLiteral(grayProp("gray.configEndpoint")))
         buildConfigField("int[]",  "SEC_AF_KEY",        encodedArrayLiteral(grayProp("gray.appsFlyerKey")))
         buildConfigField("int[]",  "SEC_FB_PROJECT",    encodedArrayLiteral(grayProp("gray.firebaseProject")))
-        buildConfigField("int[]",  "SEC_GCD_BASE",      encodedArrayLiteral(grayProp("gray.gcdBase")))
 
         buildConfigField("int[]",  "CIPHER_SEED",       "new int[]{${cipherSeedBytes.joinToString(",") { "0x%02X".format(it) }}}")
         buildConfigField("int",    "CIPHER_MULT",       cipherMult.toString())
@@ -219,6 +222,7 @@ android {
         buildConfigField("String", "K_NOTIF_SKIP",      bcStr(keyNotifSkip))
         buildConfigField("String", "K_NOTIF_GRANTED",   bcStr(keyNotifGranted))
         buildConfigField("String", "K_NOTIF_OS_DENIED", bcStr(keyNotifOsDenied))
+        buildConfigField("String", "K_NOTIF_ASKED",     bcStr(keyNotifAsked))
         buildConfigField("String", "K_FCM",             bcStr(keyFcm))
         buildConfigField("String", "K_KB_PORTRAIT",     bcStr(keyKbPortrait))
         buildConfigField("String", "K_KB_LANDSCAPE",    bcStr(keyKbLandscape))
@@ -231,12 +235,10 @@ android {
         buildConfigField("String", "FCM_CHANNEL_TITLE", bcStr(fcmChannelTitle))
 
         buildConfigField("long",   "PUSH_SNOOZE_SEC",        "${pushSnoozeSeconds}L")
-        buildConfigField("long",   "ORGANIC_GCD_DELAY_MS",   "${organicGcdDelayMs}L")
         buildConfigField("long",   "CONFIG_TIMEOUT_MS",      "${configTimeoutMs}L")
         buildConfigField("long",   "ATTRIBUTION_FIRST_MS",   "${attributionFirstMs}L")
         buildConfigField("long",   "ATTRIBUTION_RETURN_MS",  "${attributionReturnMs}L")
         buildConfigField("long",   "DEEP_LINK_WAIT_MS",      "${deepLinkWaitMs}L")
-        buildConfigField("long",   "GCD_TIMEOUT_MS",         "${gcdTimeoutMs}L")
         buildConfigField("long",   "CONNECT_GRACE_MS",       "${connectGraceMs}L")
         buildConfigField("long",   "SAFE_AREA_DELAY_MS",     "${safeAreaDelayMs}L")
         buildConfigField("long",   "HEARTBEAT_MS",           "${heartbeatMs}L")

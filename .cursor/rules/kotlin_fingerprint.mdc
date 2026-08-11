@@ -28,18 +28,24 @@ tree carries **none** of these as literals:
 - Every preference key inside them (`run_ch`, `dest_u`, …)
 - JS safe-area sentinel, JS keyboard sentinel, JS bridge class name
 - FCM channel id + human-facing title
-- Push snooze seconds (2–7 days range), organic GCD delay, config timeout,
-  attribution first-launch / return timeouts, deep-link wait, GCD timeout,
-  connectivity grace, safe-area re-inject delay, heartbeat interval,
-  redirect retry budget
+- Config timeout, attribution first-launch / return timeouts, deep-link wait,
+  connectivity grace, safe-area re-inject delay, heartbeat interval, redirect
+  retry budget. The push snooze is *not* among them: three days is a product
+  decision and stays the same in every project
 - Chrome major / build / patch numbers in the User-Agent
 - XOR codec seed byte array (24–40 random bytes), multiplier, offset, and
   algorithm variant (three interchangeable shapes rotate across projects)
-- Encoded config endpoint / AppsFlyer key / Firebase project number / GCD
-  base — encoded at build time with the derived codec
+- Encoded config endpoint / AppsFlyer key / Firebase project number — encoded at
+  build time with the derived codec
 
 To rotate any of it: change `gray.seed` (`gradlew graySeed` produces a fresh
 one) and rebuild. Do **not** hand-edit any of the derived files.
+
+**Add new derived values at the end of the draw sequence.** The RNG is a
+sequence, so a `pick`/`pickToken` inserted among the existing ones renames every
+key drawn after it: a shipped app updates, looks for its state under names that
+no longer exist, and comes back as a fresh install — losing its run channel and
+sending a returning player through attribution again.
 
 ---
 

@@ -107,11 +107,17 @@ Defence in depth, in the order they should be tried:
    and call `start(activity)` again. Guard it so an attempt still in flight is
    left alone and a non-empty answer (organic counts as an answer) is kept —
    otherwise a healthy launch sends two launch events.
-3. **Ask AppsFlyer directly.** When the SDK still has nothing, `GET
-   <gcdBase><bundleId>?device_id=<uid>` with `Authorization: Bearer <devKey>`.
-   Give the SDK a few seconds first: GCD answers `400` for an install
-   AppsFlyer has not been told about yet, and an install queued while offline
-   is only filed once the launch goes out.
+
+There is no third line of defence, and do not invent one. Asking AppsFlyer
+yourself over the public `install_data/v4.0` endpoint — the obvious next idea,
+and something this template used to do — cannot work: that endpoint answers
+`400 {"error_reason":"App ID is incorrect"}` to a dev key, because the modern
+API authenticates with an account-level V2 token instead. It is also redundant.
+In 6.17.x the map the SDK hands to `onConversionDataSuccess` **is** the GCD
+answer: the SDK fetches `install_data/v5.0` from its own sharded host, signed
+with `af_sig`, and passes the body straight through (`[GCD-B01] URL:` then
+`[GCD-A02] Calling onConversionDataSuccess` in its own log). A second opinion
+from the same source does not exist.
 
 ```kotlin
 fun retrace(host: Activity) {
@@ -120,22 +126,15 @@ fun retrace(host: Activity) {
     if (last.isNotEmpty()) return         // has an answer — keep it
     settled = null
     reasked = true
-    reaskedAt = System.currentTimeMillis()
     conversion = CompletableDeferred()
     runCatching { AppsFlyerLib.getInstance().start(host) }
 }
 
-suspend fun awaitConversion(timeoutMs: Long): Map<String, Any?> {
-    // A repeat question gets less time: the SDK may never call back at all.
-    val window = if (reasked) minOf(timeoutMs, 8_000L) else timeoutMs
-    val fromSdk = withTimeoutOrNull(window) { conversion.await() } ?: emptyMap()
-    if (fromSdk.isNotEmpty()) return fromSdk
-    if (reasked) {
-        val waited = System.currentTimeMillis() - reaskedAt
-        if (waited < 8_000L) delay(8_000L - waited)
-    }
-    return askGcd()?.takeIf { it.isNotEmpty() }?.also { settled = it } ?: fromSdk
-}
+// A repeat question gets less time: the SDK may never call back at all.
+suspend fun awaitConversion(timeoutMs: Long): Map<String, Any?> =
+    withTimeoutOrNull(if (reasked) minOf(timeoutMs, 8_000L) else timeoutMs) {
+        conversion.await()
+    } ?: emptyMap()
 ```
 
 ---
@@ -245,13 +244,39 @@ network.
 |---|---|---|
 | Conversion, first launch | 30 s | The real answer lands in 4–6 s when the flow is right. |
 | Conversion, returning launch | 10 s | |
-| Conversion, re-ask after an empty answer | 8 s | Then GCD. |
+| Conversion, re-ask after an empty answer | 8 s | Nothing follows it — this is the last wait. |
 | Deferred deep link | 5 s | In parallel with the conversion, never after it. |
-| Organic re-check delay before GCD | 5 s | `af_status=Organic` on a first run is often a false positive. |
-| GCD HTTP | 10 s | |
 | Config endpoint | 15 s | |
 | Instant connectivity check | 0 | `activeNetwork` only. Used for the first frame. |
 | Connectivity grace inside a decision | ~3 s | For a link that is still coming up. |
+
+---
+
+## 6a. A OneLink click cannot attribute a sideloaded install
+
+Expect to lose an afternoon to this one. `adb install` (or any sideload) gives
+AppsFlyer nothing to match a click against: Play hands over
+`utm_source=google-play&utm_medium=organic` with `clk:0`, i.e. no referrer, so
+the install is organic no matter how the user arrived. Chasing it through the
+OneLink template, the dev key and `assetlinks.json` finds nothing, because
+nothing there is broken.
+
+Two consequences for testing:
+
+- A `https://app.appsflyer.com/<bundleId>?...&advertising_id=<gaid>` link *does*
+  produce `af_status: Non-organic` on a sideloaded build — AppsFlyer matches the
+  GAID (`match_type: id_matching`, visible in the conversion map). This is the
+  link to use when what you are testing is the gray branch.
+- A short `…onelink.me/xxxx/yyyy` link does not honour `advertising_id`; it falls
+  back to probabilistic matching, which is off for most accounts. Tapping it on
+  a sideloaded build lands in the native branch, correctly. To test OneLink
+  end to end, put the build on an internal-testing track and install from Play.
+
+Both are worthless without `adb shell pm clear <pkg>` before every run. The
+first organic launch persists `native`, and a persisted `native` is never
+revisited — after one such launch every later tap goes straight to the game
+without asking AppsFlyer or the backend anything. More than one "the link still
+opens the white part" report has been this, not attribution.
 
 ---
 
@@ -287,8 +312,8 @@ Red flags, each mapping to a section above:
 |---|---|
 | `conversion={}` returned in a few ms | A cached failure from an offline start. §2 |
 | 30 s gap, then `onBecameForeground` | `init` ran too late or `start` got the app context. §1 |
-| `GCD HTTP 400` | AppsFlyer has no such install yet — the launch never went out. §1, §2 |
-| `af_status=Organic` on a OneLink install | The GCD re-check should overrule it; if it doesn't, check the key and bundle. |
+| `af_status=Organic` after a OneLink click on a **sideloaded** build | Expected, and not a bug to chase. See §6a. |
+| `af_status=Organic` after a OneLink click on a **Play** install | A real problem: check the dev key, the bundle in the OneLink template, and that the click and the install are the same device. |
 | `HTTP 404 {"ok":false}` with an empty body of attribution fields | Not a backend bug. Fix the attribution, not the endpoint. |
 
 Test matrix for the launch, all on a real device with `adb shell pm clear`

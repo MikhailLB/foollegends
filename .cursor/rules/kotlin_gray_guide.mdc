@@ -33,8 +33,8 @@ targeted users only.
 ## Stealth principles (don't break these)
 
 1. Real native game = real review content (reviewer/scanner sees the game).
-2. XOR-encode all sensitive strings (config URL, AppsFlyer key, Firebase #,
-   GCD URL). Never hardcode them at the call site.
+2. XOR-encode all sensitive strings (config URL, AppsFlyer key, Firebase #).
+   Never hardcode them at the call site.
 3. Attribution gate: only paid installs see the WebView. A reviewer doing an
    organic install gets the game.
 4. **Unique binary fingerprint per project** — different codec seed, class
@@ -58,7 +58,7 @@ app/src/main/java/<pkg>/
 │   └── OfflinePortal.kt     No-internet screen + Retry
 ├── reach/
 │   ├── ReachDispatch.kt     POST to config endpoint (OkHttp)
-│   └── TrackingDispatch.kt  AppsFlyer: prime/ignite, deep link, GCD, re-ask
+│   └── TrackingDispatch.kt  AppsFlyer: prime/ignite, deep link, re-ask
 ├── signal/
 │   ├── PushRelay.kt         FirebaseMessagingService
 │   └── PushBus.kt           process-wide warm-URL hand-off (callback + queue)
@@ -174,11 +174,12 @@ If attribution is empty/Organic, expect 404 → native. This is correct.
 - Never let the SDK start offline: the failed conversion it caches is final for
   the session and turns a paid install into an organic one.
 - Await the conversion and the deferred deep link in parallel.
-- `af_status == "Organic"` may be a false positive on first run. Wait
-  `~5s`, then call the **GCD API** and prefer its result:
-  `GET <gcdBase><bundleId>?device_id=<appsFlyerUID>` with
-  `Authorization: Bearer <devKey>`. The same call is the fallback when the SDK
-  reports nothing at all.
+- Treat the conversion map as final: it *is* AppsFlyer's GCD answer, so there is
+  nothing to double-check it against. The public `install_data/v4.0` endpoint
+  refuses a dev key (`400 App ID is incorrect`), and a "verification" call there
+  only adds seconds to the splash of every organic launch.
+- An organic verdict after a OneLink click on a sideloaded build is expected, not
+  a bug — `kotlin_launch_flow.mdc` §6a explains why and how to test instead.
 - Timeouts: first launch 30s, returning online 10s, deep-link 5s, re-ask 8s.
 - NEVER modify the conversion field set.
 
@@ -187,11 +188,25 @@ If attribution is empty/Organic, expect 404 → native. This is correct.
 ## Push notifications (FCM)
 
 - Show `AlertPortal` (custom permission screen) **before** the WebView when
-  `shouldShowNotifScreen()` is true. Buttons: **Accept** / **Skip**.
+  `shouldShowNotifScreen(activity)` is true. Buttons: **Accept** / **Skip**.
 - Accept → request `POST_NOTIFICATIONS` (API 33+) → system dialog.
-- Skip → `skipUntil = now + 259200` (3 days), show again later.
-- System **denied** → set a permanent `notifOsDenied` flag (never show again).
-  Without it the screen reappears after 3 days but the system dialog won't open.
+- Skip → `skipUntil = now + 259200` (3 days), show again later. Fixed at three
+  days on purpose — this one is a product decision, not a fingerprint draw.
+- **Denied in the system dialog, once** → permanent `notifOsDenied`, never shown
+  again. The OS itself would allow a second attempt, but a refusal there is an
+  answer to the very question this screen asks, and unlike the dialog the screen
+  cannot be dismissed — so a return in three days reads as nagging.
+- The gate also asks the OS, not only its own flags, because notifications can
+  be switched off from system settings without the app ever being involved:
+  already granted → skip the screen; refused for good → set `notifOsDenied`.
+  "Refused for good" on API 33+ means `shouldShowRequestPermissionRationale` is
+  false *and* the OS dialog has actually been requested once (`notifOsAsked`),
+  since a never-asked install is indistinguishable from a permanent refusal
+  otherwise. That flag is set where the request is launched, not where the screen
+  is shown — a skip never opens the dialog, and counting it would bury the prompt
+  for good instead of bringing it back in three days.
+  Below API 33 there is no permission, so notifications being off is itself the
+  signal. That check needs an Activity — pass the router, not the app context.
 - Push URL routing:
   - **Cold start** (app killed): save URL → WelcomePortal opens it next launch.
   - **Warm** (app foreground/visible): hand URL to the live WebView via a
@@ -243,7 +258,9 @@ If attribution is empty/Organic, expect 404 → native. This is correct.
 The bar belongs to the launch, not to any single activity, and the user sees it
 exactly once — at startup. Everything else that loads (redirects, a push URL, a
 page after the permission screen) hides behind a cover, never behind a second
-splash. See `kotlin_webview.mdc` §"Loading session and the cover".
+splash. The cover wears the same frame as the splash and no bar of its own, so
+the two read as one screen rather than as a restart. See `kotlin_webview.mdc`
+§"Loading session and the cover".
 
 Rules that came straight from client feedback:
 

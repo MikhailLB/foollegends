@@ -75,8 +75,12 @@ class StreamPortal : AppCompatActivity() {
 
     /** A failed load still reaches onPageFinished; without this it resets the budget. */
     private var loadFailed = false
-    /** True once one page of this session has rendered — gates the cover. */
-    private var firstPageSettled = false
+    /**
+     * True once a page has *stayed* on screen. Until then every main-frame load
+     * is treated as another hop of the entry chain and kept behind the cover —
+     * see [raiseCover].
+     */
+    private var chainSettled = false
     /** Keeps the cover raised across the reload a retry queues up. */
     private var retryPending = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -135,28 +139,33 @@ class StreamPortal : AppCompatActivity() {
             finish(); return
         }
         Trace.i(TAG, "loading initial URL (warm=${warmPush != null}, cold=${coldPush != null})")
+        // Up before the load, not on the first onPageStarted: the frames in
+        // between are what the splash would otherwise hand over to.
+        raiseCover()
         wv.loadUrl(initial)
 
         // Connectivity monitoring — react instantly on OS callback.
         scope.launch {
             wire.connectivityFlow.collect { online ->
-                if (!online) {
-                    Trace.i(TAG, "Connectivity lost (callback) → OfflinePortal")
-                    goOffline()
-                }
+                if (!online) goOffline("default network lost")
             }
         }
 
-        // Heartbeat — covers the case where the page is already loaded and the user
-        // turns off the internet: no WebView request fails, so we actively probe.
+        // Heartbeat. The OS callback only speaks up when a network goes away, and
+        // the network a loaded page rides on can stop working without going
+        // anywhere — a VPN over a switched-off Wi-Fi keeps its default network
+        // and every capability it had, and a captive portal never loses one. That
+        // is why this beat ends in an actual reachability probe and not in another
+        // reading of the same capabilities the callback already watches.
         scope.launch {
             while (true) {
                 delay(AppBlueprint.heartbeatMs)
-                if (navigatedOffline) continue
+                if (!resumed || navigatedOffline) continue
                 if (!wire.isConnected()) {
-                    Trace.i(TAG, "Heartbeat: no network → OfflinePortal")
-                    goOffline()
+                    goOffline("no network")
+                    continue
                 }
+                if (!wire.hasRealInternet()) goOffline("network unreachable")
             }
         }
 
@@ -217,16 +226,25 @@ class StreamPortal : AppCompatActivity() {
     private var coverJob: Job? = null
 
     /**
-     * Hides the empty view behind a scrim and a spinner while the session's
-     * **first** page resolves. Nothing else earns a cover: every later
-     * navigation, including every hop of an affiliate redirect chain, resolves
-     * behind the page the user is already reading, so they see the destination
-     * site appear rather than a loading screen sitting between them and it.
+     * Holds a loading frame over the WebView until the entry redirect chain has
+     * resolved, so the user is handed the destination site and never one of the
+     * hops on the way to it. An affiliate chain is several full page loads: each
+     * hop commits, paints whatever it carries — often a tracking pixel and a
+     * broken image on black — and only then runs the script that moves on.
+     *
+     * A dim scrim was not enough for the same reason: at 70% black the hop was
+     * still legible through it, which read as "a dark screen with an error". The
+     * cover has to be opaque, and once the project has real artwork it should be
+     * the splash's own frame (`<prefix>_loading_portrait` / `_landscape`, drawn
+     * CENTER_CROP) so the two are one continuous screen.
+     *
+     * Once a page stays put (see [dropCover]) the chain is over and nothing gets
+     * a cover again: an ordinary navigation resolves behind the page the user is
+     * already reading, which is better than a loading screen between them.
      *
      * Note what this is NOT: a snapshot of the view. `WebView.draw` into a software
      * canvas on a hardware-accelerated view yields solid black, which is precisely the
      * "black screen between redirects" this replaced.
-     *
      */
     private fun raiseCover() {
         coverJob?.cancel()
@@ -238,21 +256,28 @@ class StreamPortal : AppCompatActivity() {
             return
         }
         val fresh = FrameLayout(this).apply {
-            setBackgroundColor(COVER_SCRIM)
+            setBackgroundColor(Color.BLACK)
             isClickable = true
             addView(
                 android.widget.ProgressBar(this@StreamPortal).apply {
                     isIndeterminate = true
+                    indeterminateTintList =
+                        android.content.res.ColorStateList.valueOf(COVER_ACCENT)
                 },
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT,
-                    android.view.Gravity.CENTER
-                )
+                    android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+                ).apply {
+                    bottomMargin = (56f * resources.displayMetrics.density).toInt()
+                }
             )
         }
         cover = fresh
-        container.addView(
+        // The window root, not [container]: that one is padded away from the
+        // cutout, and a frame that stops short of it would not line up with the
+        // splash the cover continues.
+        coverHost().addView(
             fresh,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -269,20 +294,26 @@ class StreamPortal : AppCompatActivity() {
         }
     }
 
+    private fun coverHost(): FrameLayout = findViewById(android.R.id.content)
+
     /**
-     * @param after grace before the page is handed back. A redirect hop finishes and
-     *   starts the next load within a frame or two, and this is what keeps the cover
-     *   from blinking off and on between them.
+     * @param after grace to wait for another hop before deciding this page is the
+     *   destination. A hop's script runs after its own load finishes, so the next
+     *   navigation starts a moment *later* than this one ended — waiting is the
+     *   only way to tell a chain that is still going from one that has arrived.
+     *   [raiseCover] cancels this, which is what keeps the cover from blinking off
+     *   and on between hops.
      */
-    private fun dropCover(after: Long = COVER_LINGER_MS) {
+    private fun dropCover(after: Long = CHAIN_SETTLE_MS) {
         val current = cover ?: return
         coverJob?.cancel()
         coverJob = scope.launch {
             delay(after)
             if (cover !== current) return@launch
+            chainSettled = true
             cover = null
             current.animate().alpha(0f).setDuration(150L).withEndAction {
-                container.removeView(current)
+                coverHost().removeView(current)
             }.start()
         }
     }
@@ -295,6 +326,9 @@ class StreamPortal : AppCompatActivity() {
         override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
             val u = req.url.toString()
             val scheme = u.substringBefore(':').lowercase()
+            // A tap is proof that a page the user could read is on screen, so
+            // whatever it leads to is a navigation and not another hop.
+            if (req.isForMainFrame && req.hasGesture()) chainSettled = true
             return when {
                 scheme in WEB_SCHEMES -> {
                     if (req.isForMainFrame) deepestHop = u
@@ -316,10 +350,10 @@ class StreamPortal : AppCompatActivity() {
             // shouldOverrideUrlLoading does not see every server-side 30x, so the
             // URL the engine actually committed to is the other half of the trail.
             if (url != BLANK) deepestHop = url
-            // Only the very first page of the session is covered. After that the
-            // previous page stays on screen while the next hop resolves, so a
-            // redirect chain hands the user its destination instead of a scrim.
-            if (url != BLANK && !firstPageSettled) raiseCover()
+            // Every hop of the entry chain is covered; once a page has settled,
+            // nothing is — a later navigation resolves behind the page the user
+            // is already reading.
+            if (url != BLANK && !chainSettled) raiseCover()
             Trace.i(TAG, "onPageStarted")
         }
 
@@ -348,7 +382,7 @@ class StreamPortal : AppCompatActivity() {
             if (isNetErr || !wire.isConnected()) {
                 view.stopLoading()
                 view.loadUrl(BLANK)
-                goOffline()
+                goOffline("main-frame network error $code")
                 return
             }
 
@@ -363,7 +397,6 @@ class StreamPortal : AppCompatActivity() {
             redirectRetries = 0
             entryPointRetried = false
             retryPending = false
-            firstPageSettled = true
             lastMainFrameUrl = url
             deepestHop = url
             injectSafeAreaKill()
@@ -381,8 +414,7 @@ class StreamPortal : AppCompatActivity() {
                 return true
             }
             if (rendererRecoveries >= MAX_RENDERER_RECOVERIES) {
-                Trace.w(TAG, "renderer recovery budget exhausted → OfflinePortal")
-                goOffline()
+                goOffline("renderer recovery budget exhausted")
                 return true
             }
             rendererRecoveries++
@@ -529,9 +561,24 @@ class StreamPortal : AppCompatActivity() {
 
     @Volatile private var navigatedOffline = false
 
-    private fun goOffline() {
+    /** Only true between onResume and onPause — see [goOffline]. */
+    @Volatile private var resumed = false
+
+    /** A loss that arrived while we were in the background, owed a screen. */
+    @Volatile private var offlineDeferred = false
+
+    private fun goOffline(why: String) {
         if (navigatedOffline) return
+        // Android refuses an activity start from the background, and the call
+        // would fail silently while this flag said the screen had been shown.
+        // onResume settles it instead.
+        if (!resumed) {
+            offlineDeferred = true
+            Trace.i(TAG, "offline while backgrounded ($why) — deferred to resume")
+            return
+        }
         navigatedOffline = true
+        Trace.i(TAG, "offline ($why) → OfflinePortal")
         val cur = lastMainFrameUrl ?: wv.url
         try { wv.stopLoading(); wv.loadUrl(BLANK) } catch (_: Exception) {}
         startActivity(Intent(this, OfflinePortal::class.java).apply {
@@ -703,6 +750,45 @@ class StreamPortal : AppCompatActivity() {
         }
     }
 
+    /**
+     * The link is re-checked on every return to the foreground. Time spent in
+     * another app is exactly when a connection is lost without a WebView request
+     * being there to fail, and it is also the window where [goOffline] is not
+     * allowed to start anything.
+     */
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        val deferred = offlineDeferred
+        offlineDeferred = false
+        scope.launch {
+            val live = wire.isConnected() && wire.hasRealInternet()
+            when {
+                !live    -> goOffline("offline on resume")
+                deferred -> restoreAfterLoss()
+            }
+        }
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
+    /**
+     * The link came back while the app was in the background. Nothing navigated at
+     * the time, so if the loss had already emptied the WebView the page it
+     * interrupted has to be put back — otherwise the user returns to a black view
+     * with a working connection.
+     */
+    private fun restoreAfterLoss() {
+        val current = wv.url
+        if (!current.isNullOrBlank() && current != BLANK) return
+        val resumeAt = lastMainFrameUrl ?: deepestHop ?: vault.destinationUrl ?: return
+        Trace.i(TAG, "link back after a loss while backgrounded → reloading")
+        wv.loadUrl(resumeAt)
+    }
+
     override fun onStop() {
         if (PushBus.onWarmUrl != null) PushBus.onWarmUrl = null
         super.onStop()
@@ -728,8 +814,12 @@ class StreamPortal : AppCompatActivity() {
 
         private const val BLANK = "about:blank"
 
-        /** Long enough to bridge one redirect hop, short enough not to be felt. */
-        private const val COVER_LINGER_MS = 120L
+        /**
+         * How long a page must hold the screen before it counts as the end of the
+         * chain. Long enough for the next hop's script or meta refresh to fire,
+         * short enough to pass for the tail of the splash.
+         */
+        private const val CHAIN_SETTLE_MS = 600L
 
         /** No page may hold the screen longer than this, finished or not. */
         private const val COVER_MAX_MS = 20_000L
@@ -737,8 +827,8 @@ class StreamPortal : AppCompatActivity() {
         /** Renderer recoveries per Activity — beyond this we go offline. */
         private const val MAX_RENDERER_RECOVERIES = 3
 
-        /** Dim over the empty view while the session's first page resolves. */
-        private const val COVER_SCRIM = 0xB3000000.toInt()
+        /** Spinner tint on the cover — the accent the splash and the game use. */
+        private const val COVER_ACCENT = 0xFFF3C247.toInt()
 
         /** Pause before a queued redirect-loop retry. Long enough to let the
          *  engine finish unwinding the failed navigation, short enough to be

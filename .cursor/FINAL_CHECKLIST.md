@@ -99,9 +99,9 @@ adb logcat -s WelcomePortal:V TrackingDispatch:V ReachDispatch:V StreamPortal:V 
       `javascript:…`) → notification shows, tap does **not** open a WebView.
 - [ ] Push with an image renders BigPicture; a slow image URL does not stall
       or ANR the service.
-- [ ] Permission screen: Accept → OS dialog. Skip → re-asked only after the
-      snooze window (`gradlew grayReport` prints the value). OS "deny
-      forever" → never asked again.
+- [ ] Permission screen: Accept → OS dialog. Skip → re-asked only after three
+      days. A single "don't allow" in the OS dialog → never asked again, and
+      neither is a device whose notifications are off in system settings.
 
 ## 7. WebView shell
 

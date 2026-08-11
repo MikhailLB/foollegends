@@ -38,7 +38,12 @@ template default is `gray_`.
 - **WebP, lossy, quality ~80.** Roughly 10× smaller than PNG at the same
   perceived quality across a full-screen image, and AAPT never chokes on it
   (pitfalls #15 — PNGs with ICC profiles fail to compile).
-- **Portrait: 1080 × 1920.** **Landscape: 1920 × 1080.** One density bucket
+- **Portrait: 1080 × 1920. Landscape: 2400 × 1080** — 20:9, not 16:9. Both are
+  drawn `CENTER_CROP`, which scales to *cover*: a 1920 × 1080 image on a
+  2400 × 1080 phone is blown up 1.25× and loses a quarter of its height, so
+  every vertical position in it shifts and elements that cleared each other in
+  the file start colliding on the device. Authoring the landscape frame at the
+  widest common phone aspect means such a phone crops nothing. One density bucket
   (`res/drawable/`) is enough; Android downscales cleanly and per-density
   copies of full-screen art bloat the APK for no gain.
 - File extension does not matter to the code — `R.drawable.x` resolves either
@@ -46,11 +51,18 @@ template default is `gray_`.
 
 ### Composition rules
 
-- **Portrait art is drawn `CENTER_CROP`.** Keep anything that must be seen
-  (title, logo) inside the middle 80% vertically; the top and bottom get cut
-  on tall devices.
-- **Landscape art is drawn `CENTER_CROP` too**, so keep the subject
-  horizontally centered — the sides get cut on very wide devices.
+- **Keep every glyph and every line of copy inside the middle 70% horizontally,
+  in both orientations.** All six images are drawn `CENTER_CROP`, and in both
+  orientations that eats the sides: a 1080 × 1920 portrait file on a 1080 × 2400
+  phone is scaled up to fill the height and loses 10% of its width off each side
+  (15% at 21:9), and a 2400 × 1080 landscape file on a 16:9 screen loses the same
+  way. 86% looked fine in the file and arrived on the phone with the first and
+  last letter of the headline shaved off.
+- **Let the copy pick its own size.** A headline that does not fit the band
+  should be rendered a couple of points smaller before it is allowed to wrap —
+  "ABOUT BONUSES AND / PROMOS" is worse than the same line 8% down. Generate the
+  screens with a helper that shrinks to a floor and only then wraps, rather than
+  hand-tuning a point size per string.
 - **Leave the bottom ~22% clear** on all six images. That band is where the
   loading bar, the RETRY button, and the ACCEPT/SKIP row are drawn on top.
 - **Do not bake text into the art** that duplicates what the code draws

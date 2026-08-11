@@ -21,7 +21,7 @@ portal/AlertPortal         Push-permission screen (Accept / Skip)
 portal/OfflinePortal       No-internet screen + Retry
 NativeContentActivity      PLACEHOLDER white part — replace with your game
 reach/ReachDispatch        POST to config endpoint (OkHttp)
-reach/TrackingDispatch     AppsFlyer attribution: deep link, GCD, re-ask
+reach/TrackingDispatch     AppsFlyer attribution: deep link, conversion, re-ask
 signal/PushRelay + PushBus FCM service + warm-URL hand-off
 vault/CipherVault          XOR string deobfuscator (unique seed per project)
 vault/DataVault            prefs + EncryptedSharedPreferences
@@ -37,8 +37,8 @@ LoadingView                animated splash (placeholder art)
    `com.example.grayshell`, class names, `CipherVault` seed + formula, storage
    keys, FCM channel id and library versions. Never ship two apps identical.
 2. **`AppBlueprint`**: set `bundleId` / `appLabel` / `appNameToken`, then encode
-   and paste the config URL, AppsFlyer dev key, Firebase project number and GCD
-   base URL (decode-verify each array).
+   and paste the config URL, AppsFlyer dev key and Firebase project number
+   (decode-verify each array).
 3. **`app/build.gradle.kts`**: set `applicationId` (= bundle id).
 4. **`google-services.json`**: replace the placeholder with your real Firebase
    file (package_name must equal applicationId).

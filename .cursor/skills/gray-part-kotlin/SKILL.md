@@ -45,13 +45,13 @@ Two things generate uniqueness:
 1. **`gray.properties` → `app/build.gradle.kts` → `BuildConfig`.** One seed
    derives prefs filenames and keys, JS sentinels, the JS bridge name, the FCM
    channel id, the XOR codec parameters and variant, every timeout, the
-   redirect budget, the push snooze, the Chrome UA version tuple, and the
-   encoded credentials.
+   redirect budget, the Chrome UA version tuple, and the encoded credentials.
+   The push snooze is not derived — three days is a product decision.
 2. **`tools/rebrand.py`.** Rotates what `BuildConfig` cannot reach: the
    application package, sub-package folder names, class names, drawable prefix.
 
-If you find yourself writing a literal `259200`, `__flsa`, `fl_state`,
-`KbPan`, or `Chrome/131…` into Kotlin, stop — you are undoing it.
+If you find yourself writing a literal `__flsa`, `fl_state`, `KbPan`, or
+`Chrome/131…` into Kotlin, stop — you are undoing it.
 
 ## The rules are a specification, not a proof
 

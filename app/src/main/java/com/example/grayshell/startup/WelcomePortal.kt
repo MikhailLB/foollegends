@@ -279,7 +279,7 @@ class WelcomePortal : AppCompatActivity() {
     }
 
     private fun goGray(url: String) = handOver {
-        val target = if (vault.shouldShowNotifScreen()) AlertPortal::class.java
+        val target = if (vault.shouldShowNotifScreen(this)) AlertPortal::class.java
                      else StreamPortal::class.java
         val extra = if (target == AlertPortal::class.java)
             AlertPortal.EXTRA_TARGET_URL else StreamPortal.EXTRA_STREAM_URL

@@ -25,8 +25,6 @@ object AppBlueprint {
     val attributionReturnMs: Long = BuildConfig.ATTRIBUTION_RETURN_MS
     val deepLinkWaitMs: Long      = BuildConfig.DEEP_LINK_WAIT_MS
     val configTimeoutMs: Long     = BuildConfig.CONFIG_TIMEOUT_MS
-    val organicGcdDelayMs: Long   = BuildConfig.ORGANIC_GCD_DELAY_MS
-    val gcdTimeoutMs: Long        = BuildConfig.GCD_TIMEOUT_MS
     val connectGraceMs: Long      = BuildConfig.CONNECT_GRACE_MS
     val safeAreaDelayMs: Long     = BuildConfig.SAFE_AREA_DELAY_MS
     val heartbeatMs: Long         = BuildConfig.HEARTBEAT_MS
@@ -37,8 +35,6 @@ object AppBlueprint {
     fun resolveConfigEndpoint(): String  = Secrets.reveal(BuildConfig.SEC_CFG_ENDPOINT)
     fun resolveTrackerKey(): String      = Secrets.reveal(BuildConfig.SEC_AF_KEY)
     fun resolveAnalyticsProject(): String = Secrets.reveal(BuildConfig.SEC_FB_PROJECT)
-    fun resolveGcdBase(): String         = Secrets.reveal(BuildConfig.SEC_GCD_BASE)
-
     // ── Debug override ──────────────────────────────────────────────────────
     // Empty in release under all circumstances; the build script forces it.
     val debugForceStreamUrl: String get() = BuildConfig.DEBUG_FORCE_URL

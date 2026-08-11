@@ -9,22 +9,11 @@ import com.appsflyer.deeplink.DeepLinkResult
 import com.example.grayshell.BuildConfig
 import com.example.grayshell.blueprint.AppBlueprint
 import com.example.grayshell.core.Trace
-import com.example.grayshell.core.UserAgent
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 /**
  * AppsFlyer attribution, in two strokes. See `.cursor/rules/kotlin_launch_flow.mdc`
@@ -51,17 +40,6 @@ class TrackingDispatch(private val ctx: Context) {
     private var started = false
 
     @Volatile private var reasked = false
-    private var reaskedAt = 0L
-
-    /** Structured scope for background work that outlives a single Activity. */
-    private val bg = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    private val gcdHttp by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(AppBlueprint.gcdTimeoutMs, TimeUnit.MILLISECONDS)
-            .readTimeout(AppBlueprint.gcdTimeoutMs, TimeUnit.MILLISECONDS)
-            .build()
-    }
 
     fun prime() {
         if (primed) return
@@ -111,7 +89,6 @@ class TrackingDispatch(private val ctx: Context) {
 
         settled = null
         reasked = true
-        reaskedAt = System.currentTimeMillis()
         attribution = CompletableDeferred()
         runCatching { AppsFlyerLib.getInstance().start(host) }
         Trace.i(TAG, "attribution asked again now the link is up")
@@ -124,37 +101,27 @@ class TrackingDispatch(private val ctx: Context) {
         data.await()
     }
 
-    private suspend fun awaitConversion(timeoutMs: Long): Map<String, Any?> {
-        val window = if (reasked) minOf(timeoutMs, RETRACE_WAIT_MS) else timeoutMs
-        val fromSdk = withTimeoutOrNull(window) { attribution.await() } ?: emptyMap()
-        if (fromSdk.isNotEmpty()) return fromSdk
-
-        if (reasked) {
-            val waited = System.currentTimeMillis() - reaskedAt
-            if (waited < RETRACE_WAIT_MS) delay(RETRACE_WAIT_MS - waited)
-        }
-
-        val fromGcd = fetchGcd()
-        if (fromGcd.isNullOrEmpty()) return fromSdk
-        Trace.i(TAG, "attribution recovered from GCD")
-        settled = fromGcd
-        return fromGcd
-    }
+    private suspend fun awaitConversion(timeoutMs: Long): Map<String, Any?> =
+        withTimeoutOrNull(if (reasked) minOf(timeoutMs, RETRACE_WAIT_MS) else timeoutMs) {
+            attribution.await()
+        } ?: emptyMap()
 
     private val conversionListener = object : AppsFlyerConversionListener {
 
+        /**
+         * Whatever the SDK hands over is the answer. There is no second opinion to
+         * ask for: in 6.17.x this map *is* the GCD result — the SDK fetches
+         * `install_data/v5.0` on its own sharded host, signed with `af_sig`, and
+         * calls straight through. An earlier version of this class re-checked an
+         * `Organic` verdict against the public `install_data/v4.0` endpoint with
+         * the dev key; that endpoint answers `400 {"error_reason":"App ID is
+         * incorrect"}` (the modern API wants a V2 account token, not a dev key),
+         * so the re-check could only ever fail — after burning a ~5 s delay plus
+         * the round trip on the splash of every organic launch.
+         */
         override fun onConversionDataSuccess(raw: MutableMap<String, Any?>) {
-            Trace.i(TAG, "onConversionDataSuccess")
-            bg.launch {
-                val status = raw["af_status"]?.toString().orEmpty()
-                val resolved = if (status.equals("Organic", ignoreCase = true)) {
-                    delay(AppBlueprint.organicGcdDelayMs)
-                    fetchGcd() ?: raw
-                } else {
-                    raw
-                }
-                finish(resolved)
-            }
+            Trace.i(TAG, "onConversionDataSuccess af_status=${raw["af_status"]}")
+            finish(raw)
         }
 
         override fun onConversionDataFail(err: String?) {
@@ -190,32 +157,6 @@ class TrackingDispatch(private val ctx: Context) {
         if (!attribution.isCompleted) attribution.complete(data)
     }
 
-    private suspend fun fetchGcd(): Map<String, Any?>? = withContext(Dispatchers.IO) {
-        try {
-            val uid = AppsFlyerLib.getInstance().getAppsFlyerUID(ctx) ?: return@withContext null
-            val base = AppBlueprint.resolveGcdBase()
-            if (base.isBlank()) return@withContext null
-            val req = Request.Builder()
-                .url("$base${AppBlueprint.bundleId}?device_id=$uid")
-                .addHeader("Authorization", "Bearer ${AppBlueprint.resolveTrackerKey()}")
-                .addHeader("User-Agent", UserAgent.value)
-                .get()
-                .build()
-            gcdHttp.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    Trace.w(TAG, "GCD HTTP ${resp.code}")
-                    return@withContext null
-                }
-                val body = resp.body?.string() ?: return@withContext null
-                if (body.isBlank()) return@withContext null
-                jsonToMap(JSONObject(body))
-            }
-        } catch (e: Exception) {
-            Trace.w(TAG, "GCD fetch failed: ${e.message}")
-            null
-        }
-    }
-
     fun getAppsFlyerId(): String =
         AppsFlyerLib.getInstance().getAppsFlyerUID(ctx) ?: ""
 
@@ -242,13 +183,6 @@ class TrackingDispatch(private val ctx: Context) {
         if (firebaseProject.isNotBlank()) put("firebase_project_id", firebaseProject)
         Trace.i(TAG, "request body composed (${length()} fields)")
     }
-
-    fun shutdown() {
-        bg.cancel()
-    }
-
-    private fun jsonToMap(obj: JSONObject): Map<String, Any?> =
-        obj.keys().asSequence().associateWith { obj.opt(it) }
 
     private companion object {
         const val TAG = "TrackingDispatch"

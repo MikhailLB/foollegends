@@ -31,13 +31,16 @@ script (`app/build.gradle.kts`) turns one line of `gray.properties`
 - JS injection sentinels + the JavaScript bridge name
 - FCM notification channel id + human-facing title
 - XOR codec seed byte array + multiplier + offset + algorithm variant
-- Push snooze duration, attribution timeouts, config timeout, redirect budget,
-  heartbeat interval, safe-area re-inject delay, connectivity grace, ...
+- Attribution timeouts, config timeout, redirect budget, heartbeat interval,
+  safe-area re-inject delay, connectivity grace, ...
 - Chrome major / build / patch numbers presented in the User-Agent
 
-Two projects with different seeds share **no** value in any of the above.
+Two projects with different seeds share **no** value in any of the above. The
+push snooze is the one deliberate exception — three days everywhere, because it
+is a product decision rather than a fingerprint.
+
 The values are compiled into `BuildConfig.*`; the source tree contains no
-`259200`, no `Chrome/131.0.6778.135`, no `fl_state`, no `KbPan`.
+`Chrome/131.0.6778.135`, no `fl_state`, no `KbPan`.
 
 ### 2b. `tools/rebrand.py` — one-shot renamer
 

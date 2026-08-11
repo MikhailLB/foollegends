@@ -26,14 +26,31 @@ class NetWire(ctx: Context) {
         return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    /** True if a TCP socket can actually reach the network. */
+    /**
+     * True if a TCP handshake actually completes somewhere out on the internet.
+     *
+     * The capability check above cannot answer this, and a VPN is the case that
+     * makes the difference impossible to ignore. With a tunnel up, `activeNetwork`
+     * for this uid is the tunnel; switching Wi-Fi off leaves the tunnel exactly
+     * where it was — CONNECTED, INTERNET, VALIDATED — with nothing underneath it.
+     * No `onLost` is delivered for a network that never went away, so a loaded
+     * page simply stops loading and nothing in the app is any the wiser. Captive
+     * portals behave the same way.
+     *
+     * Two targets, and on two different ports: a network that refuses outbound 53
+     * to public resolvers, or blocks one address, must not read as "the internet
+     * is gone". Both are raw IPs on purpose — a hostname would need DNS, and DNS
+     * down a dead tunnel is precisely what hangs.
+     */
     suspend fun hasRealInternet(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            Socket().use { s ->
-                s.connect(InetSocketAddress("1.1.1.1", 53), 3_000)
-                true
-            }
-        } catch (_: Exception) { false }
+        PROBES.any { (host, port) ->
+            try {
+                Socket().use { s ->
+                    s.connect(InetSocketAddress(host, port), PROBE_TIMEOUT_MS)
+                    true
+                }
+            } catch (_: Exception) { false }
+        }
     }
 
     /**
@@ -55,4 +72,9 @@ class NetWire(ctx: Context) {
         trySend(isConnected())
         awaitClose { cm.unregisterNetworkCallback(cb) }
     }.distinctUntilChanged()
+
+    private companion object {
+        val PROBES = listOf("1.1.1.1" to 443, "8.8.8.8" to 53)
+        const val PROBE_TIMEOUT_MS = 2_000
+    }
 }

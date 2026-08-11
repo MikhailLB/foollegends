@@ -41,7 +41,7 @@ goGray()/goNative()          handOver { }: the bar fills to 100% first, always
 ### `portal/`
 | File | Role | Do not get wrong | See |
 |---|---|---|---|
-| `StreamPortal.kt` | Full-screen WebView shell | `deepestHop` (retry resumes here) and `lastMainFrameUrl` (last settled) are **different fields**. The cover is only for the session's first page. No `onReceivedError` branch may end without navigating or dropping the cover | webview, pitfalls #10 #30 #31 #33 |
+| `StreamPortal.kt` | Full-screen WebView shell | `deepestHop` (retry resumes here) and `lastMainFrameUrl` (last settled) are **different fields**. The cover is only for the entry redirect chain — until a page stays put — and it is the opaque loading frame, not a scrim. No `onReceivedError` branch may end without navigating or dropping the cover. `goOffline` needs the activity resumed, and the heartbeat probes rather than re-reading capabilities | webview, pitfalls #10 #30 #31 #33 #35 |
 | `KeyboardPan.kt` | Slides the WebView; never resizes | IME insets are stripped from the WebView; clamp to the *settled* height, remembered per orientation | keyboard |
 | `AlertPortal.kt` | Push-permission screen | Snooze on skip; OS "deny forever" is permanent | guide |
 | `OfflinePortal.kt` | No-wifi + Retry + auto-retry | With no return URL it restarts the router, so AppsFlyer is asked for the first time | pitfalls #20 |
@@ -49,7 +49,7 @@ goGray()/goNative()          handOver { }: the bar fills to 100% first, always
 ### `reach/`
 | File | Role | Do not get wrong | See |
 |---|---|---|---|
-| `TrackingDispatch.kt` | AppsFlyer: prime / ignite / retrace / GCD fallback | Conversion fields go out verbatim. `setDebugLog(BuildConfig.DEBUG)` | launch_flow, pitfalls #19 |
+| `TrackingDispatch.kt` | AppsFlyer: prime / ignite / retrace | Conversion fields go out verbatim and the SDK's verdict is final — no manual GCD re-check. `setDebugLog(BuildConfig.DEBUG)` | launch_flow, pitfalls #19 |
 | `ReachDispatch.kt` | Config POST + parse | 404 = a real "no". A thrown request = `unreachable()`, persists nothing. Response URL passes `UrlGuard` | guide |
 
 ### `signal/`
@@ -76,8 +76,8 @@ goGray()/goNative()          handOver { }: the bar fills to 100% first, always
 |---|---|
 | `AppBlueprint.kt` | Thin read-only bridge to `BuildConfig` + `Secrets`. No logic |
 | `ChannelResult.kt` | `answered` separates "server said no" from "nobody answered" |
-| `NetWire.kt` | `registerDefaultNetworkCallback` + TCP probe |
-| `LoadingView.kt` | Splash. Indeterminate bar, `complete { }` gates every handover |
+| `NetWire.kt` | `registerDefaultNetworkCallback` + TCP probe. Capabilities alone cannot see a dead VPN or a captive portal — only the probe can (pitfalls #35) |
+| `LoadingView.kt` | Splash. Indeterminate bar sized in dp off its own width, never off the view height (pitfalls #36). `complete { }` gates every handover |
 | `Fullscreen.kt` | The one immersive helper. Call **after** `setContentView` (pitfalls #2) |
 | `NativeContentActivity.kt` | **Stub.** Must be replaced with the real game before shipping |
 

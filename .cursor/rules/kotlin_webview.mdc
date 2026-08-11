@@ -102,16 +102,22 @@ Two different mechanisms, never mixed up:
   shown by the router, filled to 100% before anything replaces it. It must
   never reappear: not after the notification-permission screen, not for a push
   URL on a live shell, not between redirect hops.
-- **The cover** belongs to the WebView, and it covers **one** thing: the
-  session's first page, where all that sits underneath is an empty view. A
-  scrim plus a small spinner, raised in `onPageStarted` while
-  `firstPageSettled` is false, dropped a beat after `onPageFinished`.
+- **The cover** belongs to the WebView, and it covers **one** thing: the entry
+  redirect chain, from the first load until a page stays on screen. Nothing the
+  user could read sits underneath any of it. Make it the **opaque loading frame**,
+  not a scrim — an affiliate hop paints a tracking pixel on black, and at 70%
+  black that is still legible as "a dark screen with an error".
 
-Everything else navigates uncovered. A redirect hop, an in-page navigation, a
+The chain is over when a finished page is not followed by another main-frame load
+within ~600 ms (`CHAIN_SETTLE_MS`), or when `shouldOverrideUrlLoading` reports
+`hasGesture()` — a tap proves a readable page is on screen. Waiting is the only
+way to tell the two apart: a hop's script runs *after* its own load finishes, so
+the next navigation starts a moment later than the previous one ended.
+
+Everything after that navigates uncovered. An in-page navigation, a tap, a
 retry — the page the user is already reading stays on screen until the next one
-commits, which is both what a browser does and what the user asked for the
-first time they saw a scrim flash on every hop (pitfalls #33). Covering hops
-looks like polish and reads as the app freezing.
+commits, which is both what a browser does and what the user asked for the first
+time they saw a scrim flash on every hop (pitfalls #33).
 
 Back the cover with a timeout so a page that never reports back cannot hold the
 screen for good, and drop it on the paths that never produce a finished page —
